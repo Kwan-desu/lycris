@@ -433,10 +433,11 @@
 
   class AmbientLightEngine {
     constructor() {
+      // 320x180 resolution exceeds Chrome's 257px threshold to ensure hardware GPU acceleration
       this.bufferCanvas = document.createElement('canvas');
-      this.bufferCanvas.width = 160;
-      this.bufferCanvas.height = 90;
-      this.bufferCtx = this.bufferCanvas.getContext('2d', { alpha: false });
+      this.bufferCanvas.width = 320;
+      this.bufferCanvas.height = 180;
+      this.bufferCtx = this.bufferCanvas.getContext('2d', { alpha: false, willReadFrequently: false });
 
       // Multi-layer projection canvasses
       this.layers = [];
@@ -446,6 +447,7 @@
       this.artworkImg = new Image();
       this.artworkImg.crossOrigin = 'anonymous';
       this.lastDrawTime = 0;
+      this.lastDrawnKey = '';
     }
 
     preloadArtwork(src) {
@@ -454,7 +456,7 @@
         this.artworkImg.crossOrigin = 'anonymous';
         this.artworkImg.src = src;
         this.artworkImg.onload = () => {
-          this.drawFrame();
+          this.drawFrame(true);
         };
       }
     }
@@ -485,9 +487,9 @@
         for (let i = 1; i <= 3; i++) {
           const cvs = document.createElement('canvas');
           cvs.className = `am-projector-layer-${i}`;
-          cvs.width = 160;
-          cvs.height = 90;
-          const ctx = cvs.getContext('2d', { alpha: false });
+          cvs.width = 320;
+          cvs.height = 180;
+          const ctx = cvs.getContext('2d', { alpha: false, willReadFrequently: false });
           wrapper.appendChild(cvs);
           this.layers.push({ cvs, ctx });
         }
@@ -564,7 +566,7 @@
       requestAnimationFrame(loop);
     }
 
-    drawFrame() {
+    drawFrame(force = false) {
       // 1. Skip drawing if player is minimized to miniplayer
       const playerPage = document.querySelector('ytmusic-player-page#player-page') || document.querySelector('ytmusic-player-page');
       const isMiniplayer = playerPage ? playerPage.getAttribute('player-ui-state') === 'MINIPLAYER' : false;
@@ -587,6 +589,14 @@
       const source = this.getEffectiveSource();
       if (!source) return;
 
+      // Static Artwork optimization: do not redraw 30fps if static image hasn't changed
+      if (!force && source.type === 'image') {
+        const key = source.element.src || source.element.currentSrc;
+        if (key && key === this.lastDrawnKey) {
+          return;
+        }
+      }
+
       let drawn = false;
 
       try {
@@ -606,6 +616,7 @@
             }
             this.bufferCtx.drawImage(v, sx, sy, sw, sh, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             drawn = true;
+            this.lastDrawnKey = 'video';
           }
         } else if (source.type === 'image') {
           // Draw Album Artwork directly (100% vibrant, full coverage, zero letterbox distortion)
@@ -613,6 +624,7 @@
           if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
             this.bufferCtx.drawImage(img, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             drawn = true;
+            this.lastDrawnKey = img.src || img.currentSrc || '';
           }
         }
       } catch (e) {
@@ -621,6 +633,7 @@
           try {
             this.bufferCtx.drawImage(this.artworkImg, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             drawn = true;
+            this.lastDrawnKey = this.artworkImg.src || '';
           } catch (err) {}
         }
         // Fallback: try video if valid
@@ -630,6 +643,7 @@
             try {
               this.bufferCtx.drawImage(v, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
               drawn = true;
+              this.lastDrawnKey = 'video';
             } catch (err) {}
           }
         }

@@ -306,12 +306,14 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 input:checked + .slider {
-  background: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.55);
 }
 
 input:checked + .slider:before {
   transform: translateX(16px);
-  background-color: #16161a;
+  background-color: #ffffff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4), 0 0 8px rgba(255, 255, 255, 0.5);
 }
 
 /* Provider List */
