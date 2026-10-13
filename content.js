@@ -582,40 +582,65 @@
 
       ctx.clearRect(0, 0, targetW, targetH);
 
-      // Check if side panel (lyrics / up next) is active to adapt rightward spread
-      const sidePanel = document.querySelector('ytmusic-player-page #side-panel') || document.querySelector('#side-panel');
-      const hasSidePanel = !!(sidePanel && sidePanel.offsetParent !== null && sidePanel.clientWidth > 50);
-
       const spreadRatio = (spreadVal || 42) / 100.0;
 
-      // Mathematical anchor coordinates matching DOM layout
-      // Deep vertical spread allows top and bottom to spread outward across the entire page
-      const denom_h = 1.40 + spreadRatio * 0.70;
-      let vx, vy, vw, vh;
-      if (hasSidePanel) {
-        // Video/Art on center-left, extended rightward spread for lyrics
-        const denom_w = 1.35 + spreadRatio * 1.00;
-        vx = Math.round(targetW * ((0.15 + spreadRatio * 0.25) / denom_w));
-        vw = Math.round(targetW * (1.00 / denom_w));
-        vy = Math.round(targetH * ((0.20 + spreadRatio * 0.35) / denom_h));
-        vh = Math.round(targetH * (1.00 / denom_h));
+      // 1. Calculate player container dimensions
+      const playerContainer = document.querySelector('ytmusic-player#player') ||
+                              document.querySelector('#song-video') ||
+                              document.querySelector('ytmusic-player-page#player-page #main-panel');
+      const pRect = playerContainer ? playerContainer.getBoundingClientRect() : null;
+      const pWidth = (pRect && pRect.width > 0) ? pRect.width : 1600;
+      const pHeight = (pRect && pRect.height > 0) ? pRect.height : 900;
+      const pAspect = pWidth / pHeight;
+
+      // 2. Source intrinsic aspect ratio
+      const sAspect = sw / sh;
+
+      // 3. Compute exact visible media rectangle inside player (handling letterbox/pillarbox)
+      let visW, visH, visX, visY;
+      if (sAspect < pAspect) {
+        // Pillarboxed: portrait video (9:16) or square cover (1:1) inside landscape player
+        visH = pHeight;
+        visW = pHeight * sAspect;
+        visX = (pWidth - visW) / 2;
+        visY = 0;
+      } else if (sAspect > pAspect) {
+        // Letterboxed: ultrawide video (21:9)
+        visW = pWidth;
+        visH = pWidth / sAspect;
+        visX = 0;
+        visY = (pHeight - visH) / 2;
       } else {
-        // Symmetrical layout when side panel is absent
-        const denom_w = 1.40 + spreadRatio * 0.90;
-        vx = Math.round(targetW * ((0.20 + spreadRatio * 0.45) / denom_w));
-        vw = Math.round(targetW * (1.00 / denom_w));
-        vy = Math.round(targetH * ((0.20 + spreadRatio * 0.35) / denom_h));
-        vh = Math.round(targetH * (1.00 / denom_h));
+        // Exact 16:9 match
+        visW = pWidth;
+        visH = pHeight;
+        visX = 0;
+        visY = 0;
       }
 
-      // Sample edge depths (4% of source frame for fine perimeter sampling)
+      const fracX = visX / pWidth;
+      const fracY = visY / pHeight;
+      const fracW = visW / pWidth;
+      const fracH = visH / pHeight;
+
+      // 4. Symmetrical margin expansion in ALL directions (matches content.css wrapper)
+      const marginFactor = 0.15 + spreadRatio * 0.45;
+      const totalScale = 1.0 + 2.0 * marginFactor;
+
+      // 5. Perfectly centered video coordinates inside the ambient canvas
+      const vx = Math.round(targetW * ((marginFactor + fracX) / totalScale));
+      const vy = Math.round(targetH * ((marginFactor + fracY) / totalScale));
+      const vw = Math.round(targetW * (fracW / totalScale));
+      const vh = Math.round(targetH * (fracH / totalScale));
+
+      // 6. Sample perimeter edge strips (4% depth)
       const dx = Math.max(2, Math.round(sw * 0.04));
       const dy = Math.max(2, Math.round(sh * 0.04));
 
-      // High-density edge count: fine, dense bands (30 to 80 bands) for dense edge expansion
+      // 7. High-density edge count: fine, dense bands (30 to 80 bands)
       const numBands = Math.max(30, Math.min(80, Math.round((spreadVal || 42) * 0.45) + 16));
 
-      // Draw concentric bands from outer to inner
+      // 8. Draw concentric bands from outer to inner
       for (let k = numBands; k >= 1; k--) {
         const t = k / numBands;
         const prevT = (k - 1) / numBands;
@@ -645,7 +670,7 @@
         // 1. Left edge strip (sampled from x=0..dx, y=0..sh)
         ctx.drawImage(sourceCanvas, 0, 0, dx, sh, bx1, by1, w_left, h_left);
 
-        // 2. Right edge strip (sampled from x=sw-dx..sw, y=0..sh) -> spreads to the right
+        // 2. Right edge strip (sampled from x=sw-dx..sw, y=0..sh)
         ctx.drawImage(sourceCanvas, sw - dx, 0, dx, sh, p_bx2, by1, w_right, h_right);
 
         // 3. Top edge strip (sampled from x=0..sw, y=0..dy)
@@ -660,7 +685,7 @@
         ctx.drawImage(sourceCanvas, 0, sh - dy, dx, dy, bx1, p_by2, w_left, h_bot);
         ctx.drawImage(sourceCanvas, sw - dx, sh - dy, dx, dy, p_bx2, p_by2, w_right, h_bot);
 
-        // When blur is 0% (as shown in reference screenshot and user drawing), render subtle band boundary
+        // Subtle boundary line when Blur is 0%
         if ((blurVal || 0) === 0) {
           ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
           ctx.lineWidth = 1;
@@ -709,26 +734,29 @@
         if (source.type === 'video') {
           const v = source.element;
           if (v && v.videoWidth > 0 && v.videoHeight > 0) {
-            // Crop pillarbox/letterbox black bars to prevent ambient color dilution
             const vAspect = v.videoWidth / v.videoHeight;
-            const cAspect = this.bufferCanvas.width / this.bufferCanvas.height;
-            let sx = 0, sy = 0, sw = v.videoWidth, sh = v.videoHeight;
-            if (vAspect > cAspect) {
-              sw = v.videoHeight * cAspect;
-              sx = (v.videoWidth - sw) / 2;
-            } else if (vAspect < cAspect) {
-              sh = v.videoWidth / cAspect;
-              sy = (v.videoHeight - sh) / 2;
+            const bw = 320;
+            const bh = Math.max(160, Math.min(580, Math.round(320 / vAspect)));
+            if (this.bufferCanvas.width !== bw || this.bufferCanvas.height !== bh) {
+              this.bufferCanvas.width = bw;
+              this.bufferCanvas.height = bh;
             }
-            this.bufferCtx.drawImage(v, sx, sy, sw, sh, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
+            this.bufferCtx.drawImage(v, 0, 0, bw, bh);
             drawn = true;
             this.lastDrawnKey = 'video';
           }
         } else if (source.type === 'image') {
-          // Draw Album Artwork directly (100% vibrant, full coverage, zero letterbox distortion)
+          // Draw Album Artwork directly (100% vibrant, full coverage, zero distortion)
           const img = source.element;
           if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-            this.bufferCtx.drawImage(img, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
+            const imgAspect = img.naturalWidth / img.naturalHeight;
+            const bw = 320;
+            const bh = Math.max(160, Math.min(580, Math.round(320 / imgAspect)));
+            if (this.bufferCanvas.width !== bw || this.bufferCanvas.height !== bh) {
+              this.bufferCanvas.width = bw;
+              this.bufferCanvas.height = bh;
+            }
+            this.bufferCtx.drawImage(img, 0, 0, bw, bh);
             drawn = true;
             this.lastDrawnKey = `${img.src || img.currentSrc || ''}_${settings.ambientSpread}_${settings.ambientBlur}`;
           }
