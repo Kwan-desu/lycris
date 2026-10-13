@@ -28,6 +28,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: false, translations: [] });
       });
     return true;
+  } else if (request.action === 'SEARCH_LYRICS_CANDIDATES') {
+    handleSearchCandidates(request.query)
+      .then(result => sendResponse(result))
+      .catch(err => {
+        console.error('[Background] Search candidates error:', err);
+        sendResponse({ success: false, candidates: [] });
+      });
+    return true;
+  } else if (request.action === 'FETCH_CANDIDATE_LYRICS') {
+    handleFetchCandidateLyrics(request.candidate)
+      .then(result => sendResponse(result))
+      .catch(err => {
+        console.error('[Background] Candidate fetch error:', err);
+        sendResponse({ success: false, lyrics: '', synced: false });
+      });
+    return true;
   }
 });
 
@@ -1042,3 +1058,125 @@ async function handleTranslateLyrics(lines, cacheKey) {
     return { success: false, translations: [] };
   }
 }
+
+async function handleSearchCandidates(query) {
+  if (!query || !query.trim()) return { success: true, candidates: [] };
+  const q = query.trim();
+  const candidates = [];
+
+  const userAgent = 'LyrisLyrics/1.0.0 (https://github.com/Kwan-desu/lycris)';
+  const headers = { 'User-Agent': userAgent };
+
+  // 1. Search LRCLIB
+  try {
+    const lrclibUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(q)}`;
+    const resp = await fetchWithTimeout(lrclibUrl, { headers }, 2500);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data)) {
+        for (const item of data.slice(0, 15)) {
+          if (item && item.id) {
+            candidates.push({
+              id: String(item.id),
+              provider: 'lrclib',
+              title: item.trackName || '',
+              artist: item.artistName || '',
+              album: item.albumName || '',
+              duration: item.duration || 0,
+              synced: Boolean(item.syncedLyrics),
+              lyrics: item.syncedLyrics || item.plainLyrics || '',
+              source: 'LRCLIB'
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Background] LRCLIB candidate search error:', e);
+  }
+
+  // 2. Search NetEase
+  try {
+    const neteaseUrl = `https://music.163.com/api/search/get/web?csrf_token=&hlpretag=&hlposttag=&s=${encodeURIComponent(q)}&type=1&offset=0&total=true&limit=10`;
+    const resp = await fetchWithTimeout(neteaseUrl, {}, 2500);
+    if (resp.ok) {
+      const data = await resp.json();
+      const songs = data?.result?.songs;
+      if (Array.isArray(songs)) {
+        for (const song of songs.slice(0, 10)) {
+          if (song && song.id) {
+            const artists = (song.artists || []).map(a => a.name).join(', ');
+            candidates.push({
+              id: String(song.id),
+              provider: 'netease',
+              title: song.name || '',
+              artist: artists,
+              album: song.album?.name || '',
+              duration: Math.round((song.duration || 0) / 1000),
+              synced: true,
+              lyrics: '',
+              source: 'NetEase'
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Background] NetEase candidate search error:', e);
+  }
+
+  return { success: true, candidates };
+}
+
+async function handleFetchCandidateLyrics(candidate) {
+  if (!candidate) return { success: false, lyrics: '', synced: false };
+
+  // If candidate already has lyrics embedded (e.g. from LRCLIB search)
+  if (candidate.lyrics) {
+    return {
+      success: true,
+      lyrics: candidate.lyrics,
+      synced: candidate.synced,
+      source: candidate.source || 'LRCLIB'
+    };
+  }
+
+  if (candidate.provider === 'lrclib' && candidate.id) {
+    try {
+      const resp = await fetchWithTimeout(`https://lrclib.net/api/get/${candidate.id}`, {}, 2500);
+      if (resp.ok) {
+        const data = await resp.json();
+        const lrc = data.syncedLyrics || data.plainLyrics;
+        return {
+          success: Boolean(lrc),
+          lyrics: lrc || '',
+          synced: Boolean(data.syncedLyrics),
+          source: 'LRCLIB'
+        };
+      }
+    } catch (e) {
+      console.warn('[Background] LRCLIB candidate fetch error:', e);
+    }
+  }
+
+  if (candidate.provider === 'netease' && candidate.id) {
+    try {
+      const resp = await fetchWithTimeout(`https://music.163.com/api/song/lyric?os=pc&id=${candidate.id}&lv=-1&kv=-1&tv=-1`, {}, 2500);
+      if (resp.ok) {
+        const data = await resp.json();
+        const lrc = data?.lrc?.lyric;
+        return {
+          success: Boolean(lrc),
+          lyrics: lrc || '',
+          synced: Boolean(lrc && /\[\d{2}:\d{2}/.test(lrc)),
+          source: 'NetEase'
+        };
+      }
+    } catch (e) {
+      console.warn('[Background] NetEase candidate fetch error:', e);
+    }
+  }
+
+  return { success: false, lyrics: '', synced: false };
+}
+

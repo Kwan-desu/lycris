@@ -3,22 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ambient Light & Synced Lyrics Settings</title>
+  <title>Lyris Settings</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="popup-container">
-    <!-- Header -->
+    <!-- Brand Header -->
     <header class="popup-header">
       <div class="brand">
-        <div class="brand-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255, 255, 255, 0.9)">
-            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+        <div class="brand-mark">
+          <svg width="22" height="22" viewBox="0 0 32 32">
+            <g fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 7h20M4 14h12M4 21h7M24 13v11"/>
+              <ellipse cx="20.5" cy="24" rx="3.5" ry="2.5"/>
+            </g>
           </svg>
         </div>
         <div class="brand-text">
-          <h1>Ambient Light & Lyrics</h1>
-          <span class="sub">YouTube Music Enhanced</span>
+          <span class="wordmark">lyris</span>
+          <span class="descriptor">Lyrics in the light</span>
         </div>
       </div>
       <div class="version-tag">v1.0.0</div>
@@ -36,187 +39,190 @@
       </div>
     </div>
 
-    <!-- Section 1: Ambient Light (Like Ambient Light for YouTube) -->
-    <div class="card settings-group">
-      <div class="group-header">
-        <span class="group-title">Ambient Light</span>
-        <button class="btn-section-reset" id="btn-reset-ambient">Reset Section ↺</button>
-      </div>
+    <!-- Segmented Tab Navigation -->
+    <nav class="settings-tabs" role="tablist">
+      <button class="tab-btn active" data-tab="lyrics" role="tab" aria-selected="true">Lyrics</button>
+      <button class="tab-btn" data-tab="light" role="tab" aria-selected="false">Light</button>
+      <button class="tab-btn" data-tab="sources" role="tab" aria-selected="false">Sources</button>
+    </nav>
 
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Ambient Lighting</span>
-          <small>Always shines around video player</small>
+    <!-- Scrollable Tab Content Container -->
+    <main class="settings-body">
+      <!-- 1. Lyrics Tab -->
+      <section class="tab-content active" id="tab-lyrics">
+        <div class="card settings-group">
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Lyrics View</span>
+              <small>Display synced lyrics inside YouTube Music</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="lyricsEnabled" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Japanese Reading</span>
+              <small>Kanji furigana, romaji, or kana conversion</small>
+            </div>
+            <select id="japaneseMode" class="select-input">
+              <option value="furigana">ふりがな (Furigana)</option>
+              <option value="original">Original (漢字)</option>
+              <option value="romaji">Romaji (Alphabet)</option>
+              <option value="hiragana">ひらがな (Hiragana)</option>
+              <option value="katakana">カタカナ (Katakana)</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Show Original Below</span>
+              <small>Keep kanji line underneath reading</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="showOriginal" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Text Size</span>
+              <span class="slider-val" id="fontSizeVal">40px</span>
+            </div>
+            <input type="range" id="fontSize" min="28" max="48" step="1" value="40">
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Word & Syllable Fill</span>
+              <small>Karaoke sweep matching vocal timing</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="wordHighlight" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Click a Line to Seek</span>
+              <small>Jump playback when clicking a lyric line</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="clickToSeek" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Translate to English</span>
+              <small>English translation subtitle line</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="translationEnabled">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Audio Sync Offset</span>
+              <span class="slider-val" id="syncOffsetVal">0.0s</span>
+            </div>
+            <input type="range" id="syncOffset" min="-2500" max="2500" step="50" value="0">
+          </div>
+
+          <div class="offset-buttons">
+            <button class="btn-secondary" id="btn-offset-minus">-100ms</button>
+            <button class="btn-secondary" id="btn-offset-reset">Reset (0s)</button>
+            <button class="btn-secondary" id="btn-offset-plus">+100ms</button>
+          </div>
+
+          <p class="settings-note">Read kanji as romaji, kana, or furigana. Keep the original underneath when you need it.</p>
+          <button class="btn-text-action" id="btn-reset-lyrics">Reset lyrics settings</button>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="ambientEnabled" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
+      </section>
 
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Blur</span>
-          <span class="slider-val" id="ambientBlurVal">70%</span>
+      <!-- 2. Light Tab -->
+      <section class="tab-content" id="tab-light">
+        <div class="card settings-group">
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Ambient Light</span>
+              <small>Colors from video or album artwork</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="ambientEnabled" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Intensity</span>
+              <span class="slider-val" id="ambientBrightnessVal">95%</span>
+            </div>
+            <input type="range" id="ambientBrightness" min="25" max="140" step="5" value="95">
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Softness (Blur)</span>
+              <span class="slider-val" id="ambientBlurVal">70%</span>
+            </div>
+            <input type="range" id="ambientBlur" min="0" max="100" step="1" value="70">
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Spread</span>
+              <span class="slider-val" id="ambientSpreadVal">42%</span>
+            </div>
+            <input type="range" id="ambientSpread" min="0" max="300" step="1" value="42">
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Transition (Fade)</span>
+              <span class="slider-val" id="ambientFadeVal">Off</span>
+            </div>
+            <input type="range" id="ambientFade" min="0" max="3" step="0.1" value="0">
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-label-row">
+              <span>Color Richness (Saturation)</span>
+              <span class="slider-val" id="ambientSaturationVal">120%</span>
+            </div>
+            <input type="range" id="ambientSaturation" min="50" max="200" step="5" value="120">
+          </div>
+
+          <p class="settings-note">One color field behind the artwork and the lyrics. Keep text clear over every cover.</p>
+          <button class="btn-text-action" id="btn-reset-ambient">Reset light settings</button>
         </div>
-        <input type="range" id="ambientBlur" min="0" max="100" step="1" value="70">
-      </div>
+      </section>
 
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Spread</span>
-          <span class="slider-val" id="ambientSpreadVal">42%</span>
+      <!-- 3. Sources Tab -->
+      <section class="tab-content" id="tab-sources">
+        <div class="card settings-group">
+          <p class="settings-note" style="margin-top: 0;">Checked in this order. Song identity is verified before lyrics are accepted.</p>
+          <div class="provider-list" id="provider-list"></div>
+          <button class="btn-text-action" id="btn-reset-sources">Reset source settings</button>
         </div>
-        <input type="range" id="ambientSpread" min="0" max="300" step="1" value="42">
-      </div>
-
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Fade in duration</span>
-          <span class="slider-val" id="ambientFadeVal">Off</span>
-        </div>
-        <input type="range" id="ambientFade" min="0" max="3" step="0.1" value="0">
-      </div>
-
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Brightness</span>
-          <span class="slider-val" id="ambientBrightnessVal">95%</span>
-        </div>
-        <input type="range" id="ambientBrightness" min="50" max="200" step="5" value="95">
-      </div>
-
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Saturation</span>
-          <span class="slider-val" id="ambientSaturationVal">120%</span>
-        </div>
-        <input type="range" id="ambientSaturation" min="50" max="200" step="5" value="120">
-      </div>
-    </div>
-
-    <!-- Section 2: Lyrics Provider Order -->
-    <div class="card settings-group">
-      <div class="group-header">
-        <span class="group-title">Lyrics Provider Priority</span>
-        <button class="btn-section-reset" id="btn-reset-providers">Reset Section ↺</button>
-      </div>
-      <div class="provider-list" id="provider-list"></div>
-    </div>
-
-    <!-- Section 3: Synced Lyrics Display -->
-    <div class="card settings-group">
-      <div class="group-header">
-        <span class="group-title">Synced Lyrics Display</span>
-        <button class="btn-section-reset" id="btn-reset-lyrics">Reset Section ↺</button>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Synced Lyrics Mode</span>
-          <small>Transform lyrics panel into synchronized view</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="lyricsEnabled" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Highlight Active Lyric Line</span>
-          <small>Highlight and follow current lyric line</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="lineHighlight" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Sync Highlight to Specific Words</span>
-          <small>Progressive karaoke glow matching exact vocals</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="wordHighlight" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Highlight Animation Style</span>
-          <small>Visual animation for singing lyrics</small>
-        </div>
-        <select id="highlightStyle" class="select-input">
-          <option value="apple-glow">✨ Apple Glow (Smooth)</option>
-          <option value="karaoke-wave">🌊 Fluid Gradient Wave</option>
-          <option value="gradient-wipe">🎨 Continuous Gradient Wipe</option>
-          <option value="clean-fade">🍃 Minimalist Smooth Fade</option>
-        </select>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Click to Seek</span>
-          <small>Jump playback when clicking a line</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="clickToSeek" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Hiragana on Kanji (Furigana)</span>
-          <small>Show reading under kanji (e.g. 魚 ➔ さかな)</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="furiganaEnabled" checked>
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span>Translate to English</span>
-          <small>Google Translate English subtitle line</small>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="translationEnabled">
-          <span class="slider"></span>
-        </label>
-      </div>
-
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Lyrics Font Size</span>
-          <span class="slider-val" id="fontSizeVal">26px</span>
-        </div>
-        <input type="range" id="fontSize" min="18" max="38" step="1" value="26">
-      </div>
-
-      <div class="slider-row">
-        <div class="slider-label-row">
-          <span>Sync Offset</span>
-          <span class="slider-val" id="syncOffsetVal">0.0s</span>
-        </div>
-        <input type="range" id="syncOffset" min="-2500" max="2500" step="50" value="0">
-      </div>
-
-      <div class="offset-buttons">
-        <button class="btn-secondary" id="btn-offset-minus">-100ms</button>
-        <button class="btn-secondary" id="btn-offset-reset">Reset (0s)</button>
-        <button class="btn-secondary" id="btn-offset-plus">+100ms</button>
-      </div>
-    </div>
+      </section>
+    </main>
 
     <!-- Footer -->
     <footer class="popup-footer">
-      <button class="btn-text" id="btn-reset-all">Restore All Defaults</button>
-      <span class="powered-by">Multi-Provider Engine</span>
+      <div class="saved-indicator">
+        <span class="status-dot"></span>
+        <span>Saved automatically</span>
+      </div>
+      <button class="btn-reset-all" id="btn-reset-all">Restore Defaults</button>
     </footer>
   </div>
 

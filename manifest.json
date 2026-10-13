@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Ambient Light & Synced Lyrics for YouTube Music",
+  "name": "Lyris — Lyrics in the light",
   "version": "1.0.0",
-  "description": "Multi-level ambient lighting and synchronized lyrics with word highlighting for YouTube Music.",
+  "description": "Apple-inspired synchronized lyrics, word and syllable karaoke, ambient light and Japanese readings for YouTube Music.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -10,7 +10,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "Ambient Light & Synced Lyrics Settings",
+    "default_title": "Lyris settings",
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

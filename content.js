@@ -33,9 +33,11 @@
     lineHighlight: true, // Highlight active lyric line
     wordHighlight: true, // Syllable/word synchronized karaoke highlight to specific words
     highlightStyle: 'apple-glow', // 'apple-glow' | 'karaoke-wave' | 'gradient-wipe' | 'clean-fade'
-    furiganaEnabled: true, // Display Hiragana under Kanji
+    japaneseMode: 'furigana', // 'original' | 'furigana' | 'romaji' | 'hiragana' | 'katakana'
+    showOriginal: true, // Display original Japanese beneath readings
+    furiganaEnabled: true, // Alias for backward compatibility
     translationEnabled: false, // Display English translation under Japanese lines
-    fontSize: 26,
+    fontSize: 40, // 40px default (Apple Music typography contract)
     clickToSeek: true,
     syncOffset: 0,
     trackOffsets: {} // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
@@ -102,6 +104,9 @@
             if (stored.appleMode !== undefined && stored.lyricsEnabled === undefined) {
               settings.lyricsEnabled = stored.appleMode;
             }
+            if (stored.japaneseMode !== undefined) {
+              settings.japaneseMode = stored.japaneseMode;
+            }
             applySettingsToDOM();
           }
         });
@@ -120,7 +125,7 @@
           if (key === 'providerOrder' || key === 'enabledProviders') {
             lyricsNeedReload = true;
           }
-          if (key === 'furiganaEnabled' || key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' || key === 'lineHighlight' || key === 'highlightStyle') {
+          if (key === 'japaneseMode' || key === 'showOriginal' || key === 'furiganaEnabled' || key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' || key === 'lineHighlight' || key === 'highlightStyle') {
             lyricsNeedRerender = true;
             if (key === 'translationEnabled' && changes.translationEnabled.newValue) {
               fetchTranslationForCurrentLyrics();
@@ -129,7 +134,7 @@
         }
 
         applySettingsToDOM();
-        updateHeaderUI();
+        updateLyrisSettingsUI();
 
         if (lyricsNeedReload) {
           lyricsCache.clear();
@@ -223,40 +228,30 @@
   }
 
   function updateSyncDisplay() {
-    const valElem = document.getElementById('am-current-track-sync-val');
     const eff = getEffectiveOffset();
     const sec = (eff / 1000).toFixed(1);
     const label = (eff > 0 ? `+${sec}s` : `${sec}s`);
-    if (valElem) {
-      valElem.textContent = label;
-      if (eff !== 0) valElem.classList.add('has-custom');
-      else valElem.classList.remove('has-custom');
-    }
-    const resetBtn = document.getElementById('am-sync-track-reset');
-    if (resetBtn) {
-      resetBtn.style.display = (eff !== 0 ? 'inline-flex' : 'none');
+
+    const lyrisVal = document.getElementById('lyris-foot-sync-val') || document.getElementById('am-current-track-sync-val');
+    if (lyrisVal) {
+      lyrisVal.textContent = label;
+      if (eff !== 0) lyrisVal.classList.add('has-custom');
+      else lyrisVal.classList.remove('has-custom');
     }
 
-    // Also synchronize floating quick action bar sync indicators
-    const quickVal = document.getElementById('am-quick-sync-val');
-    if (quickVal) {
-      quickVal.textContent = label;
-      if (eff !== 0) quickVal.classList.add('has-custom');
-      else quickVal.classList.remove('has-custom');
-    }
-    const quickReset = document.getElementById('am-quick-sync-reset');
-    if (quickReset) {
-      quickReset.style.display = (eff !== 0 ? 'inline-flex' : 'none');
+    const lyrisReset = document.getElementById('lyris-foot-sync-reset') || document.getElementById('am-sync-track-reset');
+    if (lyrisReset) {
+      lyrisReset.style.display = (eff !== 0 ? 'inline-block' : 'none');
     }
 
     updateHeaderUI();
   }
 
   function showToast(message) {
-    let toast = document.getElementById('am-sync-toast');
+    let toast = document.getElementById('lyris-toast') || document.getElementById('am-sync-toast');
     if (!toast) {
       toast = document.createElement('div');
-      toast.id = 'am-sync-toast';
+      toast.id = 'lyris-toast';
       document.body.appendChild(toast);
     }
     toast.textContent = message;
@@ -264,7 +259,7 @@
     clearTimeout(toast._timer);
     toast._timer = setTimeout(() => {
       toast.classList.remove('visible');
-    }, 2500);
+    }, 2200);
   }
 
   function applySettingsToDOM() {
@@ -276,6 +271,7 @@
     // Backward compatibility scale (1.0 to 2.5)
     const spreadScale = (1.0 + (settings.ambientSpread / 100) * 0.5).toFixed(3);
 
+    root.style.setProperty('--ly-font-size', `${settings.fontSize}px`);
     root.style.setProperty('--am-font-size', `${settings.fontSize}px`);
     root.style.setProperty('--am-blur', `${blurPx}px`);
     root.style.setProperty('--am-spread', spreadRatio);
@@ -309,9 +305,10 @@
       modeBtn.textContent = isCustomActive ? 'Original' : 'Synced';
     }
 
-    const wrapper = document.getElementById('am-lyrics-wrapper');
+    const wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
     if (wrapper) {
       wrapper.dataset.highlightStyle = settings.highlightStyle || 'apple-glow';
+      wrapper.hidden = !settings.lyricsEnabled;
     }
 
     if (typeof ambientEngine !== 'undefined' && ambientEngine) {
@@ -382,6 +379,124 @@
     }
 
     return safe;
+  }
+
+  const ROMAJI_MAP = {
+    'あ': 'a', 'い': 'i', 'う': 'u', 'え': 'e', 'お': 'o',
+    'か': 'ka', 'き': 'ki', 'く': 'ku', 'け': 'ke', 'こ': 'ko',
+    'さ': 'sa', 'し': 'shi', 'す': 'su', 'せ': 'se', 'そ': 'so',
+    'た': 'ta', 'ち': 'chi', 'つ': 'tsu', 'て': 'te', 'と': 'to',
+    'な': 'na', 'に': 'ni', 'ぬ': 'nu', 'ね': 'ne', 'の': 'no',
+    'は': 'ha', 'ひ': 'hi', 'ふ': 'fu', 'へ': 'he', 'ほ': 'ho',
+    'ま': 'ma', 'み': 'mi', 'む': 'mu', 'め': 'me', 'も': 'mo',
+    'や': 'ya', 'ゆ': 'yu', 'よ': 'yo',
+    'ら': 'ra', 'り': 'ri', 'る': 'ru', 'れ': 're', 'ろ': 'ro',
+    'わ': 'wa', 'ゐ': 'wi', 'ゑ': 'we', 'を': 'wo', 'ん': 'n',
+    'が': 'ga', 'ぎ': 'gi', 'ぐ': 'gu', 'げ': 'ge', 'ご': 'go',
+    'ざ': 'za', 'じ': 'ji', 'ず': 'zu', 'ぜ': 'ze', 'ぞ': 'zo',
+    'だ': 'da', 'ぢ': 'ji', 'づ': 'zu', 'で': 'de', 'ど': 'do',
+    'ば': 'ba', 'び': 'bi', 'ぶ': 'bu', 'べ': 'be', 'ぼ': 'bo',
+    'ぱ': 'pa', 'ぴ': 'pi', 'ぷ': 'pu', 'ぺ': 'pe', 'ぽ': 'po',
+    'きゃ': 'kya', 'きゅ': 'kyu', 'きょ': 'kyo',
+    'しゃ': 'sha', 'しゅ': 'shu', 'しょ': 'sho',
+    'ちゃ': 'cha', 'ちゅ': 'chu', 'ちょ': 'cho',
+    'にゃ': 'nya', 'にゅ': 'nyu', 'にょ': 'nyo',
+    'ひゃ': 'hya', 'ひゅ': 'hyu', 'ひょ': 'hyo',
+    'みゃ': 'mya', 'みゅ': 'myu', 'みょ': 'myo',
+    'りゃ': 'rya', 'りゅ': 'ryu', 'りょ': 'ryo',
+    'ぎゃ': 'gya', 'ぎゅ': 'gyu', 'ぎょ': 'gyo',
+    'じゃ': 'ja', 'じゅ': 'ju', 'じょ': 'jo',
+    'びゃ': 'bya', 'びゅ': 'byu', 'びょ': 'byo',
+    'ぴゃ': 'pya', 'ぴゅ': 'pyu', 'ぴょ': 'pyo',
+    'ふぁ': 'fa', 'ふぃ': 'fi', 'ふぇ': 'fe', 'ふぉ': 'fo',
+    'ゔ': 'vu'
+  };
+
+  function katakanaToHiragana(str) {
+    if (!str) return '';
+    return str.replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  }
+
+  function hiraganaToKatakana(str) {
+    if (!str) return '';
+    return str.replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+  }
+
+  function textToHiragana(text) {
+    if (!text) return '';
+    const compounds = (typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) || {};
+    const singles = (typeof window !== 'undefined' && window.AM_KANJI_SINGLE) || {};
+    let res = text;
+    const regex = getCompoundRegex();
+    if (regex) {
+      res = res.replace(regex, m => compounds[m] || m);
+    }
+    res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, ch => singles[ch] || ch);
+    return katakanaToHiragana(res);
+  }
+
+  function kanaToRomaji(kana) {
+    if (!kana) return '';
+    const hira = katakanaToHiragana(kana);
+    let out = '';
+    let i = 0;
+    while (i < hira.length) {
+      if (hira[i] === 'っ' || hira[i] === 'ッ') {
+        const next2 = hira.slice(i + 1, i + 3);
+        const next1 = hira.slice(i + 1, i + 2);
+        const r = ROMAJI_MAP[next2] || ROMAJI_MAP[next1];
+        if (r) {
+          out += r[0];
+        }
+        i++;
+        continue;
+      }
+      if (hira[i] === 'ー') {
+        const lastChar = out.slice(-1);
+        if (/[aeiou]/i.test(lastChar)) {
+          out += lastChar;
+        } else {
+          out += '-';
+        }
+        i++;
+        continue;
+      }
+      const pair = hira.slice(i, i + 2);
+      if (ROMAJI_MAP[pair]) {
+        out += ROMAJI_MAP[pair];
+        i += 2;
+        continue;
+      }
+      const single = hira[i];
+      if (ROMAJI_MAP[single]) {
+        out += ROMAJI_MAP[single];
+        i++;
+        continue;
+      }
+      out += single;
+      i++;
+    }
+    return out.trim();
+  }
+
+  function convertJapaneseLine(text, mode) {
+    if (!text || mode === 'original' || !containsJapanese(text)) {
+      return { text: text, isRuby: false };
+    }
+    if (mode === 'furigana') {
+      return { text: addFurigana(text), isRuby: true };
+    }
+    const hira = textToHiragana(text);
+    if (mode === 'hiragana') {
+      return { text: hira, isRuby: false };
+    }
+    if (mode === 'katakana') {
+      return { text: hiraganaToKatakana(hira), isRuby: false };
+    }
+    if (mode === 'romaji') {
+      return { text: kanaToRomaji(hira), isRuby: false };
+    }
+    return { text: text, isRuby: false };
   }
 
   let isTranslatingLyrics = false;
@@ -1043,26 +1158,31 @@
   }
 
   function renderLoadingState(title) {
-    const listContainer = document.getElementById('am-lyrics-list');
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!listContainer) return;
     listContainer.innerHTML = `
-      <div class="am-loading-state">
-        <div class="am-spinner"></div>
-        <div class="am-state-title">${escapeHTML(title || 'Loading Lyrics')}</div>
-        <div class="am-state-desc">Fetching synchronized lyrics & analyzing song...</div>
+      <div class="lyris-state am-loading-state">
+        <div class="lyris-spinner am-spinner"></div>
+        <div>
+          <h3 class="am-state-title">Finding lyrics…</h3>
+          <p class="am-state-desc">${escapeHTML(title || 'Current track')}</p>
+        </div>
       </div>
     `;
   }
 
   function renderEmptyState() {
-    const listContainer = document.getElementById('am-lyrics-list');
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!listContainer) return;
     listContainer.innerHTML = `
-      <div class="am-empty-state">
-        <div class="am-state-title">No Lyrics Found</div>
-        <div class="am-state-desc">Lyrics are not available for this track yet.</div>
+      <div class="lyris-state am-empty-state">
+        <h3 class="am-state-title">No matching lyrics</h3>
+        <p class="am-state-desc">Lyrics are not available for this track yet.</p>
+        <button class="am-state-btn" id="lyris-empty-search-btn">Search lyrics</button>
       </div>
     `;
+    const btn = listContainer.querySelector('#lyris-empty-search-btn');
+    if (btn) btn.addEventListener('click', () => openSearchModal());
   }
 
   function renderCurrentLyricsState() {
@@ -1172,7 +1292,7 @@
   function handleTabSwitch() {
     if (isLyricsTabSelected()) {
       activateLyricsTab();
-      const list = document.getElementById('am-lyrics-list');
+      const list = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
       if (!list || !list.children.length) {
         renderCurrentLyricsState();
       }
@@ -1236,7 +1356,7 @@
       }
     });
 
-    let wrapper = document.getElementById('am-lyrics-wrapper');
+    let wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
     if (!wrapper || !wrapper.isConnected || !customRenderer.contains(wrapper)) {
       if (wrapper) wrapper.remove();
       wrapper = createLyricsDOM();
@@ -1245,7 +1365,7 @@
     wrapper.classList.remove('am-hidden');
     wrapper.style.removeProperty('display');
 
-    const list = document.getElementById('am-lyrics-list');
+    const list = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!list || !list.children.length) {
       renderCurrentLyricsState();
     }
@@ -1294,7 +1414,7 @@
     const shelf = getNativeLyricsShelf();
 
     if (shelf) {
-      let wrapper = document.getElementById('am-lyrics-wrapper');
+      let wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
       if (!wrapper || !wrapper.isConnected || !shelf.contains(wrapper)) {
         if (wrapper) wrapper.remove();
         wrapper = createLyricsDOM();
@@ -1318,891 +1438,836 @@
     const playerBar = document.querySelector('ytmusic-player-bar');
     if (!playerBar) return;
 
-    // 1. In player bar right-controls (Bottom Right)
     const rightControls = playerBar.querySelector('.right-controls-buttons') ||
                           document.querySelector('#right-controls-buttons') ||
                           playerBar;
 
-    let btn = document.getElementById('am-player-bar-trigger-btn');
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'am-player-bar-trigger-btn';
-      btn.className = 'am-player-bar-trigger';
-      btn.title = 'Settings (Ambient Light, Lyrics & Sync)';
-      btn.setAttribute('aria-label', 'Ambient Light & Synced Lyrics Settings');
-      btn.innerHTML = `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+    // 1. Show Lyrics Trigger Button (#lyris-lyrics-btn)
+    let lyricsBtn = document.getElementById('lyris-lyrics-btn');
+    if (!lyricsBtn) {
+      lyricsBtn = document.createElement('button');
+      lyricsBtn.id = 'lyris-lyrics-btn';
+      lyricsBtn.className = 'lyris-player-btn am-player-bar-trigger';
+      lyricsBtn.title = 'Show lyrics';
+      lyricsBtn.setAttribute('aria-label', 'Show lyrics');
+      lyricsBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          <path d="M8 9h8M8 13h5"></path>
         </svg>
       `;
-      btn.addEventListener('click', (e) => {
+      lyricsBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        toggleIntegratedModal();
+        const playerPage = document.querySelector('ytmusic-player-page');
+        if (playerPage && (playerPage.hidden || window.getComputedStyle(playerPage).display === 'none')) {
+          document.querySelector('ytmusic-player-bar #player-page-button, ytmusic-player-bar .toggle-player-page-button, ytmusic-player-bar #thumbnail')?.click();
+        }
+        activateLyricsTab();
       });
-      rightControls.appendChild(btn);
+      rightControls.appendChild(lyricsBtn);
+    } else if (lyricsBtn.parentElement !== rightControls) {
+      rightControls.appendChild(lyricsBtn);
+    }
+
+    // 2. Settings Trigger Button (#lyris-settings-btn)
+    let settingsBtn = document.getElementById('lyris-settings-btn') || document.getElementById('am-player-bar-trigger-btn');
+    if (!settingsBtn) {
+      settingsBtn = document.createElement('button');
+      settingsBtn.id = 'lyris-settings-btn';
+      settingsBtn.className = 'lyris-player-btn am-player-bar-trigger';
+      settingsBtn.title = 'Lyris settings (Lyrics, Ambient Light & Sources)';
+      settingsBtn.setAttribute('aria-label', 'Lyris settings');
+      settingsBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="7" x2="20" y2="7"></line>
+          <line x1="4" y1="17" x2="20" y2="17"></line>
+          <circle cx="9" cy="7" r="3" fill="currentColor"></circle>
+          <circle cx="15" cy="17" r="3" fill="currentColor"></circle>
+        </svg>
+      `;
+      settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleLyrisSettings();
+      });
+      rightControls.appendChild(settingsBtn);
     } else {
-      // Ensure it stays anchored at the bottom-right of right-controls
-      if (btn.parentElement !== rightControls || rightControls.lastElementChild !== btn) {
-        rightControls.appendChild(btn);
+      settingsBtn.id = 'lyris-settings-btn';
+      if (settingsBtn.parentElement !== rightControls || rightControls.lastElementChild !== settingsBtn) {
+        rightControls.appendChild(settingsBtn);
       }
     }
 
-    // 2. Ensure modal overlay exists
-    injectIntegratedModal();
+    const isLyricsActive = isLyricsTabSelected() || isCustomLyricsTabActive;
+    lyricsBtn.classList.toggle('active', isLyricsActive);
+    lyricsBtn.setAttribute('aria-expanded', isLyricsActive ? 'true' : 'false');
+
+    const settingsPanel = document.getElementById('lyris-settings');
+    const isSettingsOpen = settingsPanel && !settingsPanel.hidden;
+    settingsBtn.classList.toggle('active', Boolean(isSettingsOpen));
+    settingsBtn.setAttribute('aria-expanded', isSettingsOpen ? 'true' : 'false');
+
+    injectLyrisSettings();
+    injectSearchModal();
   }
 
   function createLyricsDOM() {
     const wrapper = document.createElement('div');
-    wrapper.id = 'am-lyrics-wrapper';
-    wrapper.dataset.highlightStyle = settings.highlightStyle || 'apple-glow';
+    wrapper.id = 'lyris-lyrics-wrapper';
+    wrapper.className = 'lyris-lyrics-wrapper';
 
     wrapper.innerHTML = `
-      <!-- Quick Floating Action Widget (Circle expanding downwards as clean popover card) -->
-      <div id="am-quick-tools-widget" class="am-quick-tools-widget">
-        <button id="am-quick-tools-toggle" class="am-quick-circle-btn" title="Quick Tools (Furigana, Translation, Style & Audio Sync)">
-          <span class="am-quick-circle-icon" id="am-quick-circle-icon">文A</span>
-        </button>
-
-        <div id="am-quick-tools-bar" class="am-quick-tools-bar">
-          <div class="am-quick-tools-row">
-            <!-- Japanese Furigana & Translation Segment -->
-            <div id="am-quick-jp-section" class="am-quick-section">
-              <span class="am-quick-section-label">🇯🇵</span>
-              <div class="am-quick-pills-group">
-                <button class="am-quick-pill" id="am-quick-furigana-btn" title="Toggle Hiragana readings under Kanji">ふりがな</button>
-                <button class="am-quick-pill" id="am-quick-translate-btn" title="Toggle English translation sub-lines">Translate EN</button>
-              </div>
-            </div>
-
-            <!-- Highlight Animation Style Segment -->
-            <div id="am-quick-style-section" class="am-quick-section">
-              <div class="am-quick-pills-group">
-                <button class="am-quick-pill" id="am-quick-style-btn" title="Cycle Highlight Animation Style">✨ Glow</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Audio Sync Offset Segment -->
-          <div class="am-quick-tools-row" id="am-quick-sync-row">
-            <div id="am-quick-sync-section" class="am-quick-section">
-              <span class="am-quick-section-label">Sync</span>
-              <button class="am-quick-nudge-btn" data-delta="-500" title="Shift lyrics earlier by 0.5s">-0.5s</button>
-              <button class="am-quick-nudge-btn" data-delta="-100" title="Shift lyrics earlier by 0.1s">-0.1s</button>
-              <span class="am-quick-sync-val" id="am-quick-sync-val">0.0s</span>
-              <button class="am-quick-nudge-btn" data-delta="100" title="Shift lyrics later by 0.1s">+0.1s</button>
-              <button class="am-quick-nudge-btn" data-delta="500" title="Shift lyrics later by 0.5s">+0.5s</button>
-              <button class="am-quick-reset-btn" id="am-quick-sync-reset" title="Reset track sync offset">↺</button>
-            </div>
-          </div>
-        </div>
+      <div class="lyris-scroll" id="lyris-scroll" tabindex="0" aria-label="Lyrics, scroll to browse">
+        <div class="lyris-list" id="lyris-list"></div>
       </div>
 
-      <div id="am-lyrics-scroll-container">
-        <div id="am-lyrics-list"></div>
-      </div>
-
-      <button id="am-resume-scroll-btn" title="Jump back to current lyric line">
+      <button class="lyris-resume" id="lyris-resume-btn" title="Jump back to current lyric line" hidden>
         <span class="am-resume-pulse-dot"></span>
-        <span>Resume Sync</span>
+        <span>Resume sync</span>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          <line x1="7" y1="17" x2="17" y2="7"></line>
+          <polyline points="7 7 17 7 17 17"></polyline>
         </svg>
       </button>
     `;
 
-    // Wire Quick Tools Widget toggle
-    const widget = wrapper.querySelector('#am-quick-tools-widget');
-    const toggleBtn = wrapper.querySelector('#am-quick-tools-toggle');
-    if (toggleBtn && widget) {
-      toggleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        widget.classList.toggle('expanded');
-      });
+    const scrollContainer = wrapper.querySelector('#lyris-scroll');
+    const resumeBtn = wrapper.querySelector('#lyris-resume-btn');
 
-      document.addEventListener('click', (e) => {
-        if (widget.classList.contains('expanded') && !widget.contains(e.target)) {
-          widget.classList.remove('expanded');
+    if (scrollContainer && resumeBtn) {
+      const onUserBrowse = () => {
+        if (!currentLyrics.isSynced) return;
+        userScrolled = true;
+        updateResumeSyncButton();
+      };
+
+      scrollContainer.addEventListener('wheel', onUserBrowse, { passive: true });
+      scrollContainer.addEventListener('touchmove', onUserBrowse, { passive: true });
+      scrollContainer.addEventListener('keydown', (e) => {
+        if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) {
+          onUserBrowse();
         }
       });
-    }
+      scrollContainer.addEventListener('scroll', () => {
+        updateResumeSyncButton();
+      }, { passive: true });
 
-    // Furigana pill
-    const furiganaBtn = wrapper.querySelector('#am-quick-furigana-btn');
-    if (furiganaBtn) {
-      furiganaBtn.addEventListener('click', (e) => {
+      resumeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        settings.furiganaEnabled = !settings.furiganaEnabled;
-        saveSetting('furiganaEnabled', settings.furiganaEnabled);
-        furiganaBtn.classList.toggle('active', settings.furiganaEnabled !== false);
-        showToast(settings.furiganaEnabled !== false ? 'Kanji Furigana: Enabled' : 'Kanji Furigana: Disabled');
-        if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
-          renderLyricsUI();
-          updateActiveLine();
-        } else if (currentLyrics.plainText) {
-          renderStaticLyrics(currentLyrics.plainText);
-        }
+        userScrolled = false;
+        resumeBtn.hidden = true;
+        resumeBtn.classList.remove('visible');
+        scrollToActiveLine(true);
       });
     }
-
-    // Translate pill
-    const translateBtn = wrapper.querySelector('#am-quick-translate-btn');
-    if (translateBtn) {
-      translateBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        settings.translationEnabled = !settings.translationEnabled;
-        saveSetting('translationEnabled', settings.translationEnabled);
-        translateBtn.classList.toggle('active', Boolean(settings.translationEnabled));
-        showToast(settings.translationEnabled ? 'Translation EN: Enabled' : 'Translation EN: Disabled');
-        if (settings.translationEnabled) {
-          fetchTranslationForCurrentLyrics();
-        }
-        if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
-          renderLyricsUI();
-          updateActiveLine();
-        } else if (currentLyrics.plainText) {
-          renderStaticLyrics(currentLyrics.plainText);
-        }
-      });
-    }
-
-    // Highlight Style cycle button
-    const styleBtn = wrapper.querySelector('#am-quick-style-btn');
-    if (styleBtn) {
-      const curStyle = HIGHLIGHT_STYLES.find(s => s.id === (settings.highlightStyle || 'apple-glow')) || HIGHLIGHT_STYLES[0];
-      styleBtn.textContent = curStyle.label;
-      styleBtn.title = `Style: ${curStyle.fullName} (Click to switch)`;
-
-      styleBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const currentId = settings.highlightStyle || 'apple-glow';
-        const currentIndex = HIGHLIGHT_STYLES.findIndex(s => s.id === currentId);
-        const nextIndex = (currentIndex + 1) % HIGHLIGHT_STYLES.length;
-        const nextStyle = HIGHLIGHT_STYLES[nextIndex];
-        saveSetting('highlightStyle', nextStyle.id);
-        styleBtn.textContent = nextStyle.label;
-        styleBtn.title = `Style: ${nextStyle.fullName} (Click to switch)`;
-        showToast(`Highlight style: ${nextStyle.fullName}`);
-      });
-    }
-
-    // Audio Sync nudge buttons inside quick tools bar
-    const nudgeBtns = wrapper.querySelectorAll('.am-quick-nudge-btn');
-    nudgeBtns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const delta = parseInt(btn.dataset.delta, 10);
-        if (!isNaN(delta)) {
-          adjustTrackOffset(delta);
-          const current = getEffectiveOffset();
-          const sign = current > 0 ? '+' : '';
-          showToast(`Audio sync: ${sign}${(current / 1000).toFixed(1)}s`);
-        }
-      });
-    });
-
-    const quickResetBtn = wrapper.querySelector('#am-quick-sync-reset');
-    if (quickResetBtn) {
-      quickResetBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        resetTrackOffset();
-        showToast('Audio sync reset to 0.0s');
-      });
-    }
-
-    const resumeBtn = wrapper.querySelector('#am-resume-scroll-btn');
-    resumeBtn.addEventListener('click', () => {
-      userScrolled = false;
-      resumeBtn.classList.remove('visible');
-      scrollToActiveLine(true);
-    });
-
-    const scrollContainer = wrapper.querySelector('#am-lyrics-scroll-container');
-    scrollContainer.addEventListener('wheel', handleManualScroll, { passive: true });
-    scrollContainer.addEventListener('touchmove', handleManualScroll, { passive: true });
 
     return wrapper;
   }
 
   function handleManualScroll() {
-    if (!currentLyrics.isSynced || currentLyrics.lines.length === 0) return;
-
     userScrolled = true;
-    const resumeBtn = document.getElementById('am-resume-scroll-btn');
-    if (resumeBtn) resumeBtn.classList.add('visible');
-
-    if (userScrollTimeout) {
-      clearTimeout(userScrollTimeout);
-      userScrollTimeout = null;
-    }
+    updateResumeSyncButton();
   }
 
   function updateHeaderUI() {
-    const offsetDisplay = document.getElementById('am-offset-display');
+    const offsetDisplay = document.getElementById('lyris-foot-sync-val') || document.getElementById('am-offset-display');
     if (offsetDisplay) {
       const eff = getEffectiveOffset();
       const sec = (eff / 1000).toFixed(1);
       offsetDisplay.textContent = (eff > 0 ? `+${sec}s` : `${sec}s`);
     }
+  }
 
-    const dot = document.getElementById('am-status-dot');
-    const text = document.getElementById('am-status-text');
-    if (dot && text) {
-      if (currentLyrics.isSynced) {
-        dot.className = 'am-status-dot';
-        text.textContent = `Synced (${currentLyrics.source})`;
-      } else {
-        dot.className = 'am-status-dot unsynced';
-        text.textContent = currentLyrics.source === 'native' ? 'Standard (YT)' : 'Standard Lyrics';
-      }
+  // ==========================================================================
+  // IN-PAGE RESTRAINED SETTINGS DIALOG (#lyris-settings) & SEARCH MODAL
+  // ==========================================================================
+
+  let activeLyrisTab = 'lyrics';
+
+  function updateResumeSyncButton() {
+    const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+    if (!resumeBtn) return;
+    if (!currentLyrics.isSynced || activeLineIndex < 0) {
+      resumeBtn.hidden = true;
+      resumeBtn.classList.remove('visible');
+      return;
+    }
+    const scrollContainer = document.getElementById('lyris-scroll') || document.getElementById('am-lyrics-scroll-container');
+    const activeElem = document.querySelector(`.lyris-line[data-index="${activeLineIndex}"], .am-lyric-line[data-index="${activeLineIndex}"]`);
+    if (!scrollContainer || !activeElem) {
+      resumeBtn.hidden = true;
+      resumeBtn.classList.remove('visible');
+      return;
+    }
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const elemRect = activeElem.getBoundingClientRect();
+    const relativeY = (elemRect.top + elemRect.height / 2) - containerRect.top;
+    const followY = Math.min(120, Math.max(80, scrollContainer.clientHeight * 0.24));
+    const isAway = Math.abs(relativeY - followY) > 35;
+
+    if (userScrolled && isAway) {
+      resumeBtn.hidden = false;
+      resumeBtn.classList.add('visible');
+    } else {
+      resumeBtn.hidden = true;
+      resumeBtn.classList.remove('visible');
     }
   }
 
-  // ==========================================================================
-  // IN-PAGE INTEGRATED SETTINGS MODAL
-  // ==========================================================================
-
-  let activeSettingsTab = 'ambient';
-
-  function resetModalPosition(panel) {
-    if (!panel) return;
-    panel.style.left = 'auto';
-    panel.style.top = 'auto';
-    panel.style.right = '20px';
-    panel.style.bottom = '80px';
-    panel.style.transform = '';
+  function showToast(message) {
+    let toast = document.getElementById('lyris-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'lyris-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('visible');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 2200);
   }
 
-  function injectIntegratedModal() {
-    if (document.getElementById('am-integrated-settings-overlay')) return;
+  function injectSearchModal() {
+    if (document.getElementById('lyris-search-modal')) return;
 
-    const overlay = document.createElement('div');
-    overlay.id = 'am-integrated-settings-overlay';
+    const modal = document.createElement('div');
+    modal.id = 'lyris-search-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Manual lyrics search');
+    modal.hidden = true;
 
-    overlay.innerHTML = `
-      <div id="am-integrated-settings-panel">
-        <div class="am-modal-header" title="Drag to move • Double-click to snap to bottom-right">
-          <div class="am-modal-title">
-            <svg class="am-settings-gear-svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
-            </svg>
-            <span>Settings</span>
-          </div>
-          <div class="am-modal-header-actions">
-            <button class="am-modal-reset-pos-btn" id="am-modal-reset-pos-btn" title="Snap to bottom-right">📍</button>
-            <button class="am-modal-close-btn" id="am-modal-close-btn" title="Close (Esc)">✕</button>
-          </div>
-        </div>
-
-        <!-- Segmented Tab Navigation -->
-        <div class="am-modal-nav-tabs">
-          <button class="am-tab-btn active" data-tab="ambient">
-            <span class="am-tab-icon">💡</span> Ambient Light
-          </button>
-          <button class="am-tab-btn" data-tab="lyrics">
-            <span class="am-tab-icon">🎵</span> Lyrics & Sync
-          </button>
-          <button class="am-tab-btn" data-tab="providers">
-            <span class="am-tab-icon">🌐</span> Providers
-          </button>
-        </div>
-
-        <div class="am-modal-body">
-          <!-- Tab 1: Ambient Light -->
-          <div class="am-tab-content active" id="am-tab-ambient">
-            <div class="am-settings-section">
-              <div class="am-section-header">
-                <span class="am-section-title">Ambient Lighting</span>
-                <button class="am-section-reset-btn" id="am-reset-ambient-btn">Reset Section ↺</button>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Blur</span>
-                  <span class="am-control-val" id="am-val-blur">30%</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-blur" min="0" max="100" step="1" value="30">
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Spread</span>
-                  <span class="am-control-val" id="am-val-spread">134.9%</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-spread" min="0" max="300" step="1" value="135">
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Fade in duration</span>
-                  <span class="am-control-val" id="am-val-fade">Off</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-fade" min="0" max="3" step="0.1" value="0">
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Brightness</span>
-                  <span class="am-control-val" id="am-val-brightness">100%</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-brightness" min="50" max="200" step="5" value="100">
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Saturation</span>
-                  <span class="am-control-val" id="am-val-saturation">120%</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-saturation" min="50" max="200" step="5" value="120">
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 2: Synced Lyrics Display & Timing -->
-          <div class="am-tab-content" id="am-tab-lyrics">
-            <div class="am-settings-section">
-              <div class="am-section-header">
-                <span class="am-section-title">Lyrics & Display</span>
-                <button class="am-section-reset-btn" id="am-reset-lyrics-btn">Reset Section ↺</button>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <div>
-                    <span>Highlight Active Lyric Line</span>
-                    <div class="am-control-subdesc">Highlight and track the current lyric line as song progresses</div>
-                  </div>
-                  <label class="am-toggle-switch">
-                    <input type="checkbox" id="am-inp-line-highlight">
-                    <span class="am-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <div>
-                    <span>Sync Highlight to Specific Words</span>
-                    <div class="am-control-subdesc">Syllable-by-syllable karaoke highlight matching exact vocals</div>
-                  </div>
-                  <label class="am-toggle-switch">
-                    <input type="checkbox" id="am-inp-word-highlight">
-                    <span class="am-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <div>
-                    <span>Highlight Animation Style</span>
-                    <div class="am-control-subdesc">Visual animation effect on singing lyrics</div>
-                  </div>
-                  <select id="am-inp-highlight-style" class="am-select-input">
-                    <option value="apple-glow">✨ Apple Glow (Smooth)</option>
-                    <option value="karaoke-wave">🌊 Fluid Gradient Wave</option>
-                    <option value="gradient-wipe">🎨 Continuous Gradient Wipe</option>
-                    <option value="clean-fade">🍃 Minimalist Smooth Fade</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <div>
-                    <span>Kanji Furigana (Hiragana Reading)</span>
-                    <div class="am-control-subdesc">Show Hiragana readings (e.g. さかな) under Kanji characters</div>
-                  </div>
-                  <label class="am-toggle-switch">
-                    <input type="checkbox" id="am-inp-furigana">
-                    <span class="am-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <div>
-                    <span>Translate Japanese Lyrics to English</span>
-                    <div class="am-control-subdesc">Show translated English subtitles under lyric lines via Google Translate</div>
-                  </div>
-                  <label class="am-toggle-switch">
-                    <input type="checkbox" id="am-inp-translation">
-                    <span class="am-toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Font Size</span>
-                  <span class="am-control-val" id="am-val-fontsize">26px</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-fontsize" min="18" max="38" step="1" value="26">
-              </div>
-
-              <div class="am-control-row">
-                <div class="am-control-label-row">
-                  <span>Base Audio Sync Offset</span>
-                  <span class="am-control-val" id="am-val-offset">0.0s</span>
-                </div>
-                <input type="range" class="am-slider-input" id="am-inp-offset" min="-2500" max="2500" step="50" value="0">
-              </div>
-            </div>
-          </div>
-
-          <!-- Tab 3: Lyrics Providers -->
-          <div class="am-tab-content" id="am-tab-providers">
-            <div class="am-settings-section">
-              <div class="am-section-header">
-                <span class="am-section-title">Lyrics Provider Priority</span>
-                <button class="am-section-reset-btn" id="am-reset-providers-btn">Reset Section ↺</button>
-              </div>
-              <div class="am-provider-list" id="am-provider-list-container"></div>
-            </div>
-          </div>
-        </div>
+    modal.innerHTML = `
+      <div class="lyris-search-head">
+        <h3>Find Lyrics</h3>
+        <button class="lyris-icon-btn" id="lyris-search-close-btn" aria-label="Close search (Esc)">✕</button>
+      </div>
+      <form class="lyris-search-form" id="lyris-search-form">
+        <input type="text" class="lyris-search-input" id="lyris-search-input" placeholder="Title or artist…" autocomplete="off" />
+        <button type="submit" class="lyris-search-btn">Search</button>
+      </form>
+      <div class="lyris-search-results" id="lyris-search-results">
+        <div style="font-size:12px;color:var(--ly-muted);text-align:center;padding:16px;">Type song title or artist to search synced candidates</div>
       </div>
     `;
 
-    document.body.appendChild(overlay);
+    document.body.appendChild(modal);
 
-    const panel = overlay.querySelector('#am-integrated-settings-panel');
-    const header = overlay.querySelector('.am-modal-header');
-    if (panel && header) {
-      setupModalDragging(panel, header);
-    }
+    modal.querySelector('#lyris-search-close-btn').addEventListener('click', closeSearchModal);
 
-    // Segmented tab navigation
-    const tabBtns = overlay.querySelectorAll('.am-tab-btn');
-    const tabContents = overlay.querySelectorAll('.am-tab-content');
+    const form = modal.querySelector('#lyris-search-form');
+    const input = modal.querySelector('#lyris-search-input');
+    const resultsContainer = modal.querySelector('#lyris-search-results');
 
-    function switchTab(tabKey) {
-      activeSettingsTab = tabKey;
-      tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tabKey));
-      tabContents.forEach(content => content.classList.toggle('active', content.id === `am-tab-${tabKey}`));
-    }
-
-    tabBtns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        switchTab(btn.dataset.tab);
-      });
-    });
-
-    const resetPosBtn = overlay.querySelector('#am-modal-reset-pos-btn');
-    if (resetPosBtn) {
-      resetPosBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        resetModalPosition(panel);
-      });
-    }
-
-    header.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      resetModalPosition(panel);
-    });
-
-    overlay.querySelector('#am-modal-close-btn').addEventListener('click', toggleIntegratedModal);
-
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && overlay.classList.contains('visible')) {
-        toggleIntegratedModal();
-      }
-    });
-
-    // Dismiss modal or quick tools bar on outside pointer down
-    document.addEventListener('pointerdown', (e) => {
-      const ov = document.getElementById('am-integrated-settings-overlay');
-      if (ov && ov.classList.contains('visible')) {
-        const p = document.getElementById('am-integrated-settings-panel');
-        const trigger = document.getElementById('am-player-bar-trigger-btn');
-        const footerBtn = document.getElementById('am-footer-settings-btn');
-        if (p && !p.contains(e.target) && (!trigger || !trigger.contains(e.target)) && (!footerBtn || !footerBtn.contains(e.target))) {
-          toggleIntegratedModal();
-        }
-      }
-
-      const quickWidget = document.getElementById('am-quick-tools-widget');
-      if (quickWidget && quickWidget.classList.contains('expanded')) {
-        if (!quickWidget.contains(e.target)) {
-          quickWidget.classList.remove('expanded');
-        }
-      }
-    });
-
-    // Section 1: Ambient Inputs
-    const inpBlur = overlay.querySelector('#am-inp-blur');
-    const valBlur = overlay.querySelector('#am-val-blur');
-    inpBlur.addEventListener('input', () => {
-      valBlur.textContent = `${inpBlur.value}%`;
-      saveSetting('ambientBlur', parseInt(inpBlur.value, 10));
-      applySettingsToDOM();
-    });
-
-    const inpSpread = overlay.querySelector('#am-inp-spread');
-    const valSpread = overlay.querySelector('#am-val-spread');
-    inpSpread.addEventListener('input', () => {
-      valSpread.textContent = `${inpSpread.value}%`;
-      saveSetting('ambientSpread', parseInt(inpSpread.value, 10));
-      applySettingsToDOM();
-    });
-
-    const inpFade = overlay.querySelector('#am-inp-fade');
-    const valFade = overlay.querySelector('#am-val-fade');
-    inpFade.addEventListener('input', () => {
-      const v = parseFloat(inpFade.value);
-      valFade.textContent = v === 0 ? 'Off' : `${v.toFixed(1)}s`;
-      saveSetting('ambientFadeDuration', v);
-      applySettingsToDOM();
-    });
-
-    const inpBright = overlay.querySelector('#am-inp-brightness');
-    const valBright = overlay.querySelector('#am-val-brightness');
-    inpBright.addEventListener('input', () => {
-      valBright.textContent = `${inpBright.value}%`;
-      saveSetting('ambientBrightness', parseInt(inpBright.value, 10));
-      applySettingsToDOM();
-    });
-
-    const inpSat = overlay.querySelector('#am-inp-saturation');
-    const valSat = overlay.querySelector('#am-val-saturation');
-    inpSat.addEventListener('input', () => {
-      valSat.textContent = `${inpSat.value}%`;
-      saveSetting('ambientSaturation', parseInt(inpSat.value, 10));
-      applySettingsToDOM();
-    });
-
-    // Reset Ambient Section
-    overlay.querySelector('#am-reset-ambient-btn').addEventListener('click', () => {
-      settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
-      settings.ambientSpread = DEFAULT_SETTINGS.ambientSpread;
-      settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
-      settings.ambientBrightness = DEFAULT_SETTINGS.ambientBrightness;
-      settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
-      saveSetting('ambientBlur', settings.ambientBlur);
-      saveSetting('ambientSpread', settings.ambientSpread);
-      saveSetting('ambientFadeDuration', settings.ambientFadeDuration);
-      saveSetting('ambientBrightness', settings.ambientBrightness);
-      saveSetting('ambientSaturation', settings.ambientSaturation);
-      updateModalInputsFromSettings();
-      applySettingsToDOM();
-    });
-
-    // Section 3: Lyrics Inputs
-    const inpLineHighlight = overlay.querySelector('#am-inp-line-highlight');
-    if (inpLineHighlight) {
-      inpLineHighlight.addEventListener('change', () => {
-        saveSetting('lineHighlight', inpLineHighlight.checked);
-        applySettingsToDOM();
-        updateActiveLine();
-      });
-    }
-
-    const inpWordHighlight = overlay.querySelector('#am-inp-word-highlight');
-    if (inpWordHighlight) {
-      inpWordHighlight.addEventListener('change', () => {
-        saveSetting('wordHighlight', inpWordHighlight.checked);
-        applySettingsToDOM();
-        updateActiveLine();
-      });
-    }
-
-    const inpHighlightStyle = overlay.querySelector('#am-inp-highlight-style');
-    if (inpHighlightStyle) {
-      inpHighlightStyle.addEventListener('change', () => {
-        saveSetting('highlightStyle', inpHighlightStyle.value);
-        applySettingsToDOM();
-      });
-    }
-
-    const inpFurigana = overlay.querySelector('#am-inp-furigana');
-    if (inpFurigana) {
-      inpFurigana.addEventListener('change', () => {
-        saveSetting('furiganaEnabled', inpFurigana.checked);
-        if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
-          renderLyricsUI();
-          updateActiveLine();
-        } else if (currentLyrics.plainText) {
-          renderStaticLyrics(currentLyrics.plainText);
-        }
-      });
-    }
-
-    const inpTranslation = overlay.querySelector('#am-inp-translation');
-    if (inpTranslation) {
-      inpTranslation.addEventListener('change', () => {
-        saveSetting('translationEnabled', inpTranslation.checked);
-        if (inpTranslation.checked) {
-          fetchTranslationForCurrentLyrics();
-        }
-        if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
-          renderLyricsUI();
-          updateActiveLine();
-        } else if (currentLyrics.plainText) {
-          renderStaticLyrics(currentLyrics.plainText);
-        }
-      });
-    }
-
-    const inpFont = overlay.querySelector('#am-inp-fontsize');
-    const valFont = overlay.querySelector('#am-val-fontsize');
-    inpFont.addEventListener('input', () => {
-      valFont.textContent = `${inpFont.value}px`;
-      saveSetting('fontSize', parseInt(inpFont.value, 10));
-      applySettingsToDOM();
-    });
-
-    const inpOffset = overlay.querySelector('#am-inp-offset');
-    const valOffset = overlay.querySelector('#am-val-offset');
-    inpOffset.addEventListener('input', () => {
-      const ms = parseInt(inpOffset.value, 10);
-      valOffset.textContent = ms > 0 ? `+${(ms/1000).toFixed(1)}s` : `${(ms/1000).toFixed(1)}s`;
-      saveSetting('syncOffset', ms);
-      updateHeaderUI();
-    });
-
-    overlay.querySelector('#am-reset-lyrics-btn').addEventListener('click', () => {
-      settings.fontSize = DEFAULT_SETTINGS.fontSize;
-      settings.syncOffset = DEFAULT_SETTINGS.syncOffset;
-      settings.lyricsEnabled = DEFAULT_SETTINGS.lyricsEnabled;
-      settings.appleMode = DEFAULT_SETTINGS.appleMode;
-      settings.lineHighlight = DEFAULT_SETTINGS.lineHighlight;
-      settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
-      settings.highlightStyle = DEFAULT_SETTINGS.highlightStyle;
-      settings.furiganaEnabled = DEFAULT_SETTINGS.furiganaEnabled;
-      settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
-      saveSetting('fontSize', settings.fontSize);
-      saveSetting('syncOffset', settings.syncOffset);
-      saveSetting('lyricsEnabled', settings.lyricsEnabled);
-      saveSetting('appleMode', settings.appleMode);
-      saveSetting('lineHighlight', settings.lineHighlight);
-      saveSetting('wordHighlight', settings.wordHighlight);
-      saveSetting('highlightStyle', settings.highlightStyle);
-      saveSetting('furiganaEnabled', settings.furiganaEnabled);
-      saveSetting('translationEnabled', settings.translationEnabled);
-      updateModalInputsFromSettings();
-      applySettingsToDOM();
-      updateHeaderUI();
-      renderLyricsUI();
-      updateActiveLine();
-    });
-
-    // Reset Provider Section
-    overlay.querySelector('#am-reset-providers-btn').addEventListener('click', () => {
-      settings.providerOrder = [...DEFAULT_SETTINGS.providerOrder];
-      settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
-      saveSetting('providerOrder', settings.providerOrder);
-      saveSetting('enabledProviders', settings.enabledProviders);
-      renderProviderListUI();
-      lyricsCache.clear();
-      safeSendMessage({ action: 'CLEAR_CACHE' });
-      loadLyricsForCurrentTrack(true);
-    });
-
-    updateModalInputsFromSettings();
-    renderProviderListUI();
-  }
-
-  function setupModalDragging(panel, header) {
-    let isDragging = false;
-    let startX = 0, startY = 0;
-    let startLeft = 0, startTop = 0;
-
-    header.addEventListener('mousedown', (e) => {
-      if (e.target.closest('#am-modal-close-btn') || e.target.closest('button')) return;
-      isDragging = true;
-      header.style.cursor = 'grabbing';
-
-      const rect = panel.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      startX = e.clientX;
-      startY = e.clientY;
-
-      panel.style.bottom = 'auto';
-      panel.style.right = 'auto';
-      panel.style.left = `${startLeft}px`;
-      panel.style.top = `${startTop}px`;
+    form.addEventListener('submit', (e) => {
       e.preventDefault();
-    });
+      const query = input.value.trim();
+      if (!query) return;
 
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+      resultsContainer.innerHTML = '<div style="font-size:12px;color:var(--ly-muted);text-align:center;padding:16px;">Searching…</div>';
 
-      const newLeft = Math.max(8, Math.min(window.innerWidth - panel.offsetWidth - 8, startLeft + dx));
-      const newTop = Math.max(8, Math.min(window.innerHeight - panel.offsetHeight - 8, startTop + dy));
+      safeSendMessage({ action: 'SEARCH_LYRICS_CANDIDATES', query }, (response) => {
+        if (!response || !response.candidates || response.candidates.length === 0) {
+          resultsContainer.innerHTML = '<div style="font-size:12px;color:var(--ly-muted);text-align:center;padding:16px;">No candidates found. Try a different query.</div>';
+          return;
+        }
 
-      panel.style.left = `${newLeft}px`;
-      panel.style.top = `${newTop}px`;
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        header.style.cursor = 'grab';
-      }
+        resultsContainer.innerHTML = '';
+        response.candidates.forEach(cand => {
+          const item = document.createElement('div');
+          item.className = 'lyris-candidate-item';
+          const durSec = cand.duration ? `${Math.floor(cand.duration / 60)}:${String(Math.floor(cand.duration % 60)).padStart(2, '0')}` : '';
+          item.innerHTML = `
+            <div class="lyris-candidate-title">${escapeHTML(cand.title || 'Unknown Title')}</div>
+            <div class="lyris-candidate-meta">${escapeHTML(cand.artist || 'Unknown Artist')} • ${escapeHTML(cand.source || 'LRCLIB')} ${durSec ? '• ' + durSec : ''} ${cand.synced ? '• ⏱ Synced' : '• Plain'}</div>
+          `;
+          item.addEventListener('click', () => {
+            resultsContainer.innerHTML = '<div style="font-size:12px;color:var(--ly-muted);text-align:center;padding:16px;">Loading candidate lyrics…</div>';
+            safeSendMessage({ action: 'FETCH_CANDIDATE_LYRICS', candidate: cand }, (res) => {
+              if (res && res.success && res.lyrics) {
+                const trackInfo = getCurrentTrackInfo();
+                const trackKey = `${trackInfo.cleanTitle}__${trackInfo.cleanArtist}`.toLowerCase();
+                currentLyrics = {
+                  isSynced: res.synced,
+                  lines: res.synced ? parseLRC(res.lyrics) : [],
+                  plainText: res.synced ? '' : res.lyrics,
+                  source: `${res.source || 'Manual'} (${cand.title})`
+                };
+                lyricsCache.set(trackKey, currentLyrics);
+                renderCurrentLyricsState();
+                closeSearchModal();
+                showToast(`Applied lyrics: ${cand.title}`);
+              } else {
+                showToast('Could not load candidate lyrics.');
+                closeSearchModal();
+              }
+            });
+          });
+          resultsContainer.appendChild(item);
+        });
+      });
     });
   }
 
-  function toggleIntegratedModal() {
-    injectIntegratedModal();
-    const overlay = document.getElementById('am-integrated-settings-overlay');
-    if (!overlay) return;
-    const isVisible = overlay.classList.contains('visible');
-    const triggerBtn = document.getElementById('am-player-bar-trigger-btn');
-
-    if (isVisible) {
-      overlay.classList.remove('visible');
-      if (triggerBtn) triggerBtn.classList.remove('active');
-    } else {
-      updateModalInputsFromSettings();
-      renderProviderListUI();
-      const panel = overlay.querySelector('#am-integrated-settings-panel');
-      if (panel) {
-        const tabBtns = panel.querySelectorAll('.am-tab-btn');
-        const tabContents = panel.querySelectorAll('.am-tab-content');
-        tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === activeSettingsTab));
-        tabContents.forEach(c => c.classList.toggle('active', c.id === `am-tab-${activeSettingsTab}`));
-      }
-      overlay.classList.add('visible');
-      if (triggerBtn) triggerBtn.classList.add('active');
+  function openSearchModal(defaultQuery) {
+    injectSearchModal();
+    const modal = document.getElementById('lyris-search-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    const input = modal.querySelector('#lyris-search-input');
+    if (input) {
+      const track = getCurrentTrackInfo();
+      input.value = defaultQuery || `${track.cleanTitle || track.title} ${track.cleanArtist || track.artist}`.trim();
+      input.focus();
+      input.select();
     }
   }
 
-  function updateModalInputsFromSettings() {
-    const overlay = document.getElementById('am-integrated-settings-overlay');
-    if (!overlay) return;
-
-    overlay.querySelector('#am-inp-blur').value = settings.ambientBlur;
-    overlay.querySelector('#am-val-blur').textContent = `${settings.ambientBlur}%`;
-
-    overlay.querySelector('#am-inp-spread').value = settings.ambientSpread;
-    overlay.querySelector('#am-val-spread').textContent = `${settings.ambientSpread}%`;
-
-    overlay.querySelector('#am-inp-fade').value = settings.ambientFadeDuration;
-    overlay.querySelector('#am-val-fade').textContent = settings.ambientFadeDuration > 0 ? `${settings.ambientFadeDuration.toFixed(1)}s` : 'Off';
-
-    overlay.querySelector('#am-inp-brightness').value = settings.ambientBrightness;
-    overlay.querySelector('#am-val-brightness').textContent = `${settings.ambientBrightness}%`;
-
-    overlay.querySelector('#am-inp-saturation').value = settings.ambientSaturation;
-    overlay.querySelector('#am-val-saturation').textContent = `${settings.ambientSaturation}%`;
-
-    const inpLineHighlight = overlay.querySelector('#am-inp-line-highlight');
-    if (inpLineHighlight) {
-      inpLineHighlight.checked = settings.lineHighlight !== false;
-    }
-
-    const inpWordHighlight = overlay.querySelector('#am-inp-word-highlight');
-    if (inpWordHighlight) {
-      inpWordHighlight.checked = settings.wordHighlight !== false;
-    }
-
-    const inpHighlightStyle = overlay.querySelector('#am-inp-highlight-style');
-    if (inpHighlightStyle) {
-      inpHighlightStyle.value = settings.highlightStyle || 'apple-glow';
-    }
-
-    const inpFurigana = overlay.querySelector('#am-inp-furigana');
-    if (inpFurigana) {
-      inpFurigana.checked = settings.furiganaEnabled !== false;
-    }
-
-    const inpTranslation = overlay.querySelector('#am-inp-translation');
-    if (inpTranslation) {
-      inpTranslation.checked = Boolean(settings.translationEnabled);
-    }
-
-    overlay.querySelector('#am-inp-fontsize').value = settings.fontSize;
-    overlay.querySelector('#am-val-fontsize').textContent = `${settings.fontSize}px`;
-
-    overlay.querySelector('#am-inp-offset').value = settings.syncOffset;
-    const ms = settings.syncOffset;
-    overlay.querySelector('#am-val-offset').textContent = ms > 0 ? `+${(ms/1000).toFixed(1)}s` : `${(ms/1000).toFixed(1)}s`;
+  function closeSearchModal() {
+    const modal = document.getElementById('lyris-search-modal');
+    if (modal) modal.hidden = true;
   }
 
-  const PROVIDER_LABELS = {
-    'lrclib': 'LRCLIB (Western & Global)',
-    'netease': 'Netease (Japanese, Anime, Asian)',
-    'kugou': 'Kugou (International & Asian)',
-    'qq': 'QQ Music (International & Asian)',
-    'youtube-cc': 'YouTube Captions (CC)',
-    'native': 'YouTube Music Native Lyrics'
-  };
+  function injectLyrisSettings() {
+    if (document.getElementById('lyris-settings')) return;
 
-  function renderProviderListUI() {
-    const container = document.getElementById('am-provider-list-container');
+    const panel = document.createElement('div');
+    panel.id = 'lyris-settings';
+    panel.className = 'lyris-settings';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Lyris settings');
+    panel.hidden = true;
+
+    panel.innerHTML = `
+      <div class="lyris-settings-head">
+        <div class="lyris-brand">
+          <svg class="lyris-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18V5l12-2v13"></path>
+            <circle cx="6" cy="18" r="3"></circle>
+            <circle cx="18" cy="16" r="3"></circle>
+          </svg>
+          <span class="lyris-wordmark">lyris</span>
+        </div>
+        <button class="lyris-icon-btn" id="lyris-settings-close-btn" aria-label="Close settings (Esc)">✕</button>
+      </div>
+      <div class="lyris-settings-tabs" role="tablist">
+        <button role="tab" id="lyris-tab-lyrics" aria-selected="true" data-tab="lyrics">Lyrics</button>
+        <button role="tab" id="lyris-tab-light" aria-selected="false" data-tab="light">Light</button>
+        <button role="tab" id="lyris-tab-sources" aria-selected="false" data-tab="sources">Sources</button>
+      </div>
+      <div class="lyris-settings-body">
+        <!-- Lyrics Pane -->
+        <div class="lyris-pane" id="lyris-pane-lyrics">
+          <label class="lyris-setting">
+            <span>Japanese script</span>
+            <select id="lyris-opt-japanese-mode">
+              <option value="furigana">Furigana</option>
+              <option value="romaji">Romaji</option>
+              <option value="hiragana">Hiragana</option>
+              <option value="katakana">Katakana</option>
+              <option value="original">Original only</option>
+            </select>
+          </label>
+          <label class="lyris-setting">
+            <span>Show original text</span>
+            <input type="checkbox" id="lyris-opt-show-original">
+          </label>
+          <label class="lyris-setting">
+            <span>Line translation</span>
+            <input type="checkbox" id="lyris-opt-translation">
+          </label>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Lyric font size</span>
+              <output id="lyris-font-size-val">40px</output>
+            </div>
+            <input type="range" id="lyris-opt-font-size" min="24" max="52" step="2" value="40">
+          </div>
+          <label class="lyris-setting">
+            <span>Word & syllable karaoke</span>
+            <input type="checkbox" id="lyris-opt-word-karaoke">
+          </label>
+          <label class="lyris-setting">
+            <span>Click lyric to seek</span>
+            <input type="checkbox" id="lyris-opt-click-seek">
+          </label>
+          <button class="lyris-text-action" id="lyris-reset-lyrics-btn">Reset lyrics settings</button>
+        </div>
+
+        <!-- Light Pane -->
+        <div class="lyris-pane" id="lyris-pane-light" hidden>
+          <label class="lyris-setting">
+            <span>Ambient lighting</span>
+            <input type="checkbox" id="lyris-opt-ambient-enabled">
+          </label>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Intensity</span>
+              <output id="lyris-intensity-val">95%</output>
+            </div>
+            <input type="range" id="lyris-opt-intensity" min="30" max="150" step="5" value="95">
+          </div>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Spread</span>
+              <output id="lyris-spread-val">1.35x</output>
+            </div>
+            <input type="range" id="lyris-opt-spread" min="0.8" max="2.2" step="0.05" value="1.35">
+          </div>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Blur</span>
+              <output id="lyris-blur-val">70px</output>
+            </div>
+            <input type="range" id="lyris-opt-blur" min="20" max="140" step="5" value="70">
+          </div>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Saturation</span>
+              <output id="lyris-sat-val">120%</output>
+            </div>
+            <input type="range" id="lyris-opt-saturation" min="50" max="200" step="5" value="120">
+          </div>
+          <div class="lyris-setting-range">
+            <div class="lyris-range-label">
+              <span>Fade duration</span>
+              <output id="lyris-fade-val">0.15s</output>
+            </div>
+            <input type="range" id="lyris-opt-fade" min="0.05" max="0.5" step="0.05" value="0.15">
+          </div>
+          <button class="lyris-text-action" id="lyris-reset-light-btn">Reset light settings</button>
+        </div>
+
+        <!-- Sources Pane -->
+        <div class="lyris-pane" id="lyris-pane-sources" hidden>
+          <p class="lyris-settings-note">Drag or use arrows to order provider waterfall priority.</p>
+          <div class="lyris-sources-list" id="lyris-sources-container"></div>
+          <button class="lyris-text-action" id="lyris-reset-sources-btn">Reset provider order</button>
+        </div>
+      </div>
+      <div class="lyris-settings-foot">
+        <span class="lyris-status-dot"></span>
+        <span id="lyris-settings-status">Ready</span>
+        <span class="lyris-version-label">v1.0.0</span>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    const tabs = panel.querySelectorAll('.lyris-settings-tabs button');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        tabs.forEach(t => t.setAttribute('aria-selected', 'false'));
+        tab.setAttribute('aria-selected', 'true');
+        activeLyrisTab = tab.dataset.tab;
+        panel.querySelector('#lyris-pane-lyrics').hidden = (activeLyrisTab !== 'lyrics');
+        panel.querySelector('#lyris-pane-light').hidden = (activeLyrisTab !== 'light');
+        panel.querySelector('#lyris-pane-sources').hidden = (activeLyrisTab !== 'sources');
+        if (activeLyrisTab === 'sources') {
+          renderSourcesListUI();
+        }
+      });
+    });
+
+    panel.querySelector('#lyris-settings-close-btn').addEventListener('click', closeLyrisSettings);
+
+    setupLyrisSettingsControls(panel);
+    updateLyrisSettingsUI();
+  }
+
+  function setupLyrisSettingsControls(panel) {
+    // 1. Lyrics controls
+    const jMode = panel.querySelector('#lyris-opt-japanese-mode');
+    if (jMode) {
+      jMode.addEventListener('change', () => {
+        settings.japaneseMode = jMode.value;
+        saveSetting('japaneseMode', settings.japaneseMode);
+        renderCurrentLyricsState();
+      });
+    }
+
+    const showOrig = panel.querySelector('#lyris-opt-show-original');
+    if (showOrig) {
+      showOrig.addEventListener('change', () => {
+        settings.showOriginal = showOrig.checked;
+        saveSetting('showOriginal', settings.showOriginal);
+        renderCurrentLyricsState();
+      });
+    }
+
+    const transOpt = panel.querySelector('#lyris-opt-translation');
+    if (transOpt) {
+      transOpt.addEventListener('change', () => {
+        settings.translationEnabled = transOpt.checked;
+        saveSetting('translationEnabled', settings.translationEnabled);
+        if (settings.translationEnabled && (!currentLyrics.translations || currentLyrics.translations.length === 0)) {
+          fetchTranslationForCurrentLyrics();
+        } else {
+          renderCurrentLyricsState();
+        }
+      });
+    }
+
+    const fontSizeInput = panel.querySelector('#lyris-opt-font-size');
+    const fontSizeVal = panel.querySelector('#lyris-font-size-val');
+    if (fontSizeInput) {
+      fontSizeInput.addEventListener('input', () => {
+        const val = parseInt(fontSizeInput.value, 10);
+        if (fontSizeVal) fontSizeVal.textContent = `${val}px`;
+        settings.fontSize = val;
+        document.documentElement.style.setProperty('--ly-font-size', `${val}px`);
+        document.documentElement.style.setProperty('--am-font-size', `${val}px`);
+        saveSetting('fontSize', val);
+      });
+    }
+
+    const wordKaraoke = panel.querySelector('#lyris-opt-word-karaoke');
+    if (wordKaraoke) {
+      wordKaraoke.addEventListener('change', () => {
+        settings.wordHighlight = wordKaraoke.checked;
+        saveSetting('wordHighlight', settings.wordHighlight);
+      });
+    }
+
+    const clickSeek = panel.querySelector('#lyris-opt-click-seek');
+    if (clickSeek) {
+      clickSeek.addEventListener('change', () => {
+        settings.clickToSeek = clickSeek.checked;
+        saveSetting('clickToSeek', settings.clickToSeek);
+      });
+    }
+
+    // Reset Lyrics
+    const resetLyricsBtn = panel.querySelector('#lyris-reset-lyrics-btn');
+    if (resetLyricsBtn) {
+      resetLyricsBtn.addEventListener('click', () => {
+        settings.japaneseMode = 'furigana';
+        settings.showOriginal = true;
+        settings.translationEnabled = false;
+        settings.fontSize = 40;
+        settings.wordHighlight = true;
+        settings.clickToSeek = true;
+        saveSetting('japaneseMode', 'furigana');
+        saveSetting('showOriginal', true);
+        saveSetting('translationEnabled', false);
+        saveSetting('fontSize', 40);
+        saveSetting('wordHighlight', true);
+        saveSetting('clickToSeek', true);
+        updateLyrisSettingsUI();
+        renderCurrentLyricsState();
+        showToast('Lyrics settings reset to defaults');
+      });
+    }
+
+    // 2. Light controls
+    const ambToggle = panel.querySelector('#lyris-opt-ambient-enabled');
+    if (ambToggle) {
+      ambToggle.addEventListener('change', () => {
+        settings.ambientLighting = ambToggle.checked;
+        saveSetting('ambientLighting', settings.ambientLighting);
+        ambientEngine.toggle(settings.ambientLighting);
+      });
+    }
+
+    const intInput = panel.querySelector('#lyris-opt-intensity');
+    const intVal = panel.querySelector('#lyris-intensity-val');
+    if (intInput) {
+      intInput.addEventListener('input', () => {
+        const val = parseInt(intInput.value, 10);
+        if (intVal) intVal.textContent = `${val}%`;
+        settings.ambientIntensity = val;
+        ambientEngine.updateBrightness(val);
+        saveSetting('ambientIntensity', val);
+      });
+    }
+
+    const spreadInput = panel.querySelector('#lyris-opt-spread');
+    const spreadVal = panel.querySelector('#lyris-spread-val');
+    if (spreadInput) {
+      spreadInput.addEventListener('input', () => {
+        const val = parseFloat(spreadInput.value);
+        if (spreadVal) spreadVal.textContent = `${val.toFixed(2)}x`;
+        settings.ambientSpread = val;
+        ambientEngine.updateSpread(val);
+        saveSetting('ambientSpread', val);
+      });
+    }
+
+    const blurInput = panel.querySelector('#lyris-opt-blur');
+    const blurVal = panel.querySelector('#lyris-blur-val');
+    if (blurInput) {
+      blurInput.addEventListener('input', () => {
+        const val = parseInt(blurInput.value, 10);
+        if (blurVal) blurVal.textContent = `${val}px`;
+        settings.ambientBlur = val;
+        ambientEngine.updateBlur(val);
+        saveSetting('ambientBlur', val);
+      });
+    }
+
+    const satInput = panel.querySelector('#lyris-opt-saturation');
+    const satVal = panel.querySelector('#lyris-sat-val');
+    if (satInput) {
+      satInput.addEventListener('input', () => {
+        const val = parseInt(satInput.value, 10);
+        if (satVal) satVal.textContent = `${val}%`;
+        settings.ambientSaturation = val;
+        ambientEngine.updateSaturation(val);
+        saveSetting('ambientSaturation', val);
+      });
+    }
+
+    const fadeInput = panel.querySelector('#lyris-opt-fade');
+    const fadeVal = panel.querySelector('#lyris-fade-val');
+    if (fadeInput) {
+      fadeInput.addEventListener('input', () => {
+        const val = parseFloat(fadeInput.value);
+        if (fadeVal) fadeVal.textContent = `${val.toFixed(2)}s`;
+        settings.ambientFadeDuration = val;
+        ambientEngine.updateFadeDuration(val);
+        saveSetting('ambientFadeDuration', val);
+      });
+    }
+
+    // Reset Light
+    const resetLightBtn = panel.querySelector('#lyris-reset-light-btn');
+    if (resetLightBtn) {
+      resetLightBtn.addEventListener('click', () => {
+        settings.ambientLighting = true;
+        settings.ambientIntensity = 95;
+        settings.ambientSpread = 1.35;
+        settings.ambientBlur = 70;
+        settings.ambientSaturation = 120;
+        settings.ambientFadeDuration = 0.15;
+        saveSetting('ambientLighting', true);
+        saveSetting('ambientIntensity', 95);
+        saveSetting('ambientSpread', 1.35);
+        saveSetting('ambientBlur', 70);
+        saveSetting('ambientSaturation', 120);
+        saveSetting('ambientFadeDuration', 0.15);
+        ambientEngine.toggle(true);
+        ambientEngine.updateBrightness(95);
+        ambientEngine.updateSpread(1.35);
+        ambientEngine.updateBlur(70);
+        ambientEngine.updateSaturation(120);
+        ambientEngine.updateFadeDuration(0.15);
+        updateLyrisSettingsUI();
+        showToast('Light settings reset to defaults');
+      });
+    }
+
+    // 3. Reset Sources
+    const resetSourcesBtn = panel.querySelector('#lyris-reset-sources-btn');
+    if (resetSourcesBtn) {
+      resetSourcesBtn.addEventListener('click', () => {
+        settings.providerOrder = [...DEFAULT_SETTINGS.providerOrder];
+        settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
+        saveSetting('providerOrder', settings.providerOrder);
+        saveSetting('enabledProviders', settings.enabledProviders);
+        renderSourcesListUI();
+        lyricsCache.clear();
+        safeSendMessage({ action: 'CLEAR_CACHE' });
+        loadLyricsForCurrentTrack(true);
+        showToast('Provider order reset to defaults');
+      });
+    }
+  }
+
+  function updateLyrisSettingsUI() {
+    const panel = document.getElementById('lyris-settings');
+    if (!panel) return;
+
+    const jMode = panel.querySelector('#lyris-opt-japanese-mode');
+    if (jMode) jMode.value = settings.japaneseMode || 'furigana';
+
+    const showOrig = panel.querySelector('#lyris-opt-show-original');
+    if (showOrig) showOrig.checked = settings.showOriginal !== false;
+
+    const transOpt = panel.querySelector('#lyris-opt-translation');
+    if (transOpt) transOpt.checked = Boolean(settings.translationEnabled);
+
+    const fsInput = panel.querySelector('#lyris-opt-font-size');
+    const fsVal = panel.querySelector('#lyris-font-size-val');
+    if (fsInput) fsInput.value = settings.fontSize || 40;
+    if (fsVal) fsVal.textContent = `${settings.fontSize || 40}px`;
+
+    const wk = panel.querySelector('#lyris-opt-word-karaoke');
+    if (wk) wk.checked = settings.wordHighlight !== false;
+
+    const cs = panel.querySelector('#lyris-opt-click-seek');
+    if (cs) cs.checked = settings.clickToSeek !== false;
+
+    const amb = panel.querySelector('#lyris-opt-ambient-enabled');
+    if (amb) amb.checked = settings.ambientLighting !== false;
+
+    const intInput = panel.querySelector('#lyris-opt-intensity');
+    const intVal = panel.querySelector('#lyris-intensity-val');
+    if (intInput) intInput.value = settings.ambientIntensity ?? 95;
+    if (intVal) intVal.textContent = `${settings.ambientIntensity ?? 95}%`;
+
+    const spreadInput = panel.querySelector('#lyris-opt-spread');
+    const spreadVal = panel.querySelector('#lyris-spread-val');
+    if (spreadInput) spreadInput.value = settings.ambientSpread ?? 1.35;
+    if (spreadVal) spreadVal.textContent = `${(settings.ambientSpread ?? 1.35).toFixed(2)}x`;
+
+    const blurInput = panel.querySelector('#lyris-opt-blur');
+    const blurVal = panel.querySelector('#lyris-blur-val');
+    if (blurInput) blurInput.value = settings.ambientBlur ?? 70;
+    if (blurVal) blurVal.textContent = `${settings.ambientBlur ?? 70}px`;
+
+    const satInput = panel.querySelector('#lyris-opt-saturation');
+    const satVal = panel.querySelector('#lyris-sat-val');
+    if (satInput) satInput.value = settings.ambientSaturation ?? 120;
+    if (satVal) satVal.textContent = `${settings.ambientSaturation ?? 120}%`;
+
+    const fadeInput = panel.querySelector('#lyris-opt-fade');
+    const fadeVal = panel.querySelector('#lyris-fade-val');
+    if (fadeInput) fadeInput.value = settings.ambientFadeDuration ?? 0.15;
+    if (fadeVal) fadeVal.textContent = `${(settings.ambientFadeDuration ?? 0.15).toFixed(2)}s`;
+
+    renderSourcesListUI();
+  }
+
+  function renderSourcesListUI() {
+    const container = document.getElementById('lyris-sources-container');
     if (!container) return;
 
     container.innerHTML = '';
     const order = settings.providerOrder || DEFAULT_SETTINGS.providerOrder;
+    const enabled = settings.enabledProviders || DEFAULT_SETTINGS.enabledProviders;
 
-    order.forEach((providerKey, index) => {
-      const item = document.createElement('div');
-      item.className = 'am-provider-item';
+    const names = {
+      'lrclib': 'LRCLIB (Synced & Plain)',
+      'netease': 'NetEase Music (网易云音乐)',
+      'kugou': 'KuGou Music (酷狗音乐)',
+      'youtube-cc': 'YouTube Captions (CC)',
+      'native': 'YouTube Music Native',
+      'qq': 'QQ Music (Disabled by default)'
+    };
 
-      const isEnabled = settings.enabledProviders ? settings.enabledProviders[providerKey] !== false : true;
-      const label = PROVIDER_LABELS[providerKey] || providerKey;
+    order.forEach((providerId, index) => {
+      const isChecked = enabled[providerId] !== false;
+      const row = document.createElement('div');
+      row.className = 'lyris-source-row';
 
-      item.innerHTML = `
-        <div class="am-provider-left">
-          <input type="checkbox" id="am-chk-${providerKey}" ${isEnabled ? 'checked' : ''}>
-          <span>${index + 1}. ${label}</span>
-        </div>
-        <div class="am-provider-actions">
-          <button class="am-reorder-btn" data-action="up" data-index="${index}" ${index === 0 ? 'disabled' : ''}>▲</button>
-          <button class="am-reorder-btn" data-action="down" data-index="${index}" ${index === order.length - 1 ? 'disabled' : ''}>▼</button>
+      row.innerHTML = `
+        <label class="lyris-source-info">
+          <input type="checkbox" data-provider="${providerId}" ${isChecked ? 'checked' : ''}>
+          <span>${names[providerId] || providerId}</span>
+        </label>
+        <div style="display:flex;gap:4px;">
+          <button class="lyris-icon-btn" data-action="up" title="Move up" ${index === 0 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▲</button>
+          <button class="lyris-icon-btn" data-action="down" title="Move down" ${index === order.length - 1 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''}>▼</button>
         </div>
       `;
 
-      item.querySelector(`input[type="checkbox"]`).addEventListener('change', (e) => {
-        if (!settings.enabledProviders) settings.enabledProviders = {};
-        settings.enabledProviders[providerKey] = e.target.checked;
+      const chk = row.querySelector('input[type="checkbox"]');
+      chk.addEventListener('change', () => {
+        if (!settings.enabledProviders) settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
+        settings.enabledProviders[providerId] = chk.checked;
         saveSetting('enabledProviders', settings.enabledProviders);
         lyricsCache.clear();
         safeSendMessage({ action: 'CLEAR_CACHE' });
         loadLyricsForCurrentTrack(true);
       });
 
-      const upBtn = item.querySelector('[data-action="up"]');
-      if (upBtn) {
+      const upBtn = row.querySelector('[data-action="up"]');
+      if (upBtn && index > 0) {
         upBtn.addEventListener('click', () => {
-          if (index > 0) {
-            const temp = order[index];
-            order[index] = order[index - 1];
-            order[index - 1] = temp;
-            settings.providerOrder = order;
-            saveSetting('providerOrder', settings.providerOrder);
-            renderProviderListUI();
-            lyricsCache.clear();
-            safeSendMessage({ action: 'CLEAR_CACHE' });
-            loadLyricsForCurrentTrack(true);
-          }
+          const temp = order[index];
+          order[index] = order[index - 1];
+          order[index - 1] = temp;
+          settings.providerOrder = order;
+          saveSetting('providerOrder', settings.providerOrder);
+          renderSourcesListUI();
+          lyricsCache.clear();
+          safeSendMessage({ action: 'CLEAR_CACHE' });
+          loadLyricsForCurrentTrack(true);
         });
       }
 
-      const downBtn = item.querySelector('[data-action="down"]');
-      if (downBtn) {
+      const downBtn = row.querySelector('[data-action="down"]');
+      if (downBtn && index < order.length - 1) {
         downBtn.addEventListener('click', () => {
-          if (index < order.length - 1) {
-            const temp = order[index];
-            order[index] = order[index + 1];
-            order[index + 1] = temp;
-            settings.providerOrder = order;
-            saveSetting('providerOrder', settings.providerOrder);
-            renderProviderListUI();
-            lyricsCache.clear();
-            safeSendMessage({ action: 'CLEAR_CACHE' });
-            loadLyricsForCurrentTrack(true);
-          }
+          const temp = order[index];
+          order[index] = order[index + 1];
+          order[index + 1] = temp;
+          settings.providerOrder = order;
+          saveSetting('providerOrder', settings.providerOrder);
+          renderSourcesListUI();
+          lyricsCache.clear();
+          safeSendMessage({ action: 'CLEAR_CACHE' });
+          loadLyricsForCurrentTrack(true);
         });
       }
 
-      container.appendChild(item);
+      container.appendChild(row);
     });
   }
+
+  function openLyrisSettings() {
+    injectLyrisSettings();
+    const panel = document.getElementById('lyris-settings');
+    if (panel) {
+      panel.hidden = false;
+      updateLyrisSettingsUI();
+    }
+    const trigger = document.getElementById('lyris-settings-btn');
+    if (trigger) {
+      trigger.classList.add('active');
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function closeLyrisSettings() {
+    const panel = document.getElementById('lyris-settings');
+    if (panel) panel.hidden = true;
+    const trigger = document.getElementById('lyris-settings-btn');
+    if (trigger) {
+      trigger.classList.remove('active');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    }
+  }
+
+  function toggleLyrisSettings() {
+    const panel = document.getElementById('lyris-settings');
+    if (panel && !panel.hidden) {
+      closeLyrisSettings();
+    } else {
+      openLyrisSettings();
+    }
+  }
+
+  function toggleIntegratedModal() {
+    toggleLyrisSettings();
+  }
+
+  // Global Esc key and click outside listener
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const settingsPanel = document.getElementById('lyris-settings');
+      if (settingsPanel && !settingsPanel.hidden) {
+        closeLyrisSettings();
+        return;
+      }
+      const searchModal = document.getElementById('lyris-search-modal');
+      if (searchModal && !searchModal.hidden) {
+        closeSearchModal();
+        return;
+      }
+    }
+  });
+
+  window.addEventListener('click', (e) => {
+    const panel = document.getElementById('lyris-settings');
+    const trigger = document.getElementById('lyris-settings-btn');
+    if (panel && !panel.hidden) {
+      if (!panel.contains(e.target) && !trigger?.contains(e.target)) {
+        closeLyrisSettings();
+      }
+    }
+  });
 
   // ==========================================================================
   // LRC PARSER & TIME SYNC ENGINE
@@ -2219,7 +2284,6 @@
       rawLine = rawLine.trim();
       if (!rawLine) continue;
 
-      // Parse standard LRC header offset tag: [offset:+500] or [offset:-200]
       const offsetMatch = rawLine.match(/^\[offset:\s*([+-]?\d+)\s*\]/i);
       if (offsetMatch) {
         const ms = parseInt(offsetMatch[1], 10);
@@ -2249,7 +2313,6 @@
     return result;
   }
 
-  // --- Word & Syllable Tokenizer & Timing Generator ---
   function tokenizeLineText(text) {
     if (!text) return [];
     const regexCmp = getCompoundRegex();
@@ -2276,7 +2339,6 @@
       ? Math.max(1.0, Math.min(8.0, nextLine.time - lineStart))
       : defaultDuration;
 
-    // Filter to singing tokens (non-whitespace)
     const singingTokens = [];
     tokens.forEach((tok, idx) => {
       if (tok.trim().length > 0) {
@@ -2285,7 +2347,7 @@
     });
 
     const totalSinging = singingTokens.length;
-    const activeSingDuration = lineDuration * 0.90; // 90% singing span, 10% breathing gap
+    const activeSingDuration = lineDuration * 0.90;
 
     const tokenTimings = tokens.map((tok, idx) => {
       const isSinging = tok.trim().length > 0;
@@ -2306,43 +2368,58 @@
     return tokenTimings;
   }
 
+  function renderLoadingState(title) {
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
+    if (!listContainer) return;
+    listContainer.innerHTML = `
+      <div class="lyris-state am-loading-state">
+        <div class="lyris-spinner am-spinner"></div>
+        <div class="lyris-state-text">
+          <h3>Finding lyrics…</h3>
+          <p>${escapeHTML(title || 'Current track')}</p>
+        </div>
+      </div>
+    `;
+  }
+
   function renderLyricsUI() {
-    const listContainer = document.getElementById('am-lyrics-list');
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!listContainer) return;
 
     listContainer.innerHTML = '';
+    listContainer.classList.remove('lyris-plain');
 
     if (currentLyrics.lines.length === 0) {
       if (currentLyrics.plainText) {
         renderStaticLyrics(currentLyrics.plainText);
       } else {
         listContainer.innerHTML = `
-          <div class="am-empty-state">
-            <div class="am-state-title">No Lyrics Found</div>
-            <div class="am-state-desc">Lyrics are not available for this track yet.</div>
+          <div class="lyris-state am-empty-state">
+            <h3>No matching lyrics</h3>
+            <p>Lyrics are not available for this track yet.</p>
+            <button class="am-state-btn" id="lyris-empty-search-btn">Search lyrics</button>
           </div>
         `;
+        const btn = listContainer.querySelector('#lyris-empty-search-btn');
+        if (btn) btn.addEventListener('click', () => openSearchModal());
       }
       return;
     }
 
     const fragment = document.createDocumentFragment();
-
-    const topSpace = document.createElement('div');
-    topSpace.className = 'am-lyric-line empty-space';
-    fragment.appendChild(topSpace);
+    const mode = settings.japaneseMode || 'furigana';
 
     currentLyrics.lines.forEach((line, index) => {
       const nextLine = currentLyrics.lines[index + 1];
       line.wordTimings = computeWordTimings(line, nextLine);
 
       const lineElem = document.createElement('div');
-      lineElem.className = 'am-lyric-line';
+      lineElem.className = 'lyris-line am-lyric-line';
       lineElem.dataset.index = index;
       lineElem.dataset.time = line.time;
 
       const primaryContainer = document.createElement('div');
-      primaryContainer.className = 'am-line-primary';
+      primaryContainer.className = 'lyris-line-primary am-line-primary';
 
       if (line.wordTimings && line.wordTimings.length > 0) {
         line.wordTimings.forEach((w, wIdx) => {
@@ -2350,34 +2427,35 @@
             primaryContainer.appendChild(document.createTextNode(w.text));
           } else {
             const span = document.createElement('span');
-            span.className = 'am-word';
+            span.className = 'lyris-word am-word';
             span.dataset.wordIdx = wIdx;
-            if (settings.furiganaEnabled !== false && containsKanji(w.text)) {
-              span.innerHTML = addFurigana(w.text);
-            } else {
-              span.textContent = w.text;
-            }
+            span.innerHTML = convertJapaneseLine(w.text, mode);
             primaryContainer.appendChild(span);
           }
         });
       } else {
-        if (settings.furiganaEnabled !== false && containsKanji(line.text)) {
-          primaryContainer.innerHTML = addFurigana(line.text || '♪');
-        } else {
-          primaryContainer.textContent = line.text || '♪';
-        }
+        primaryContainer.innerHTML = convertJapaneseLine(line.text || '♪', mode);
       }
 
       lineElem.appendChild(primaryContainer);
 
+      // Dual-line Japanese reading layout: show original beneath reading if enabled
+      if (settings.showOriginal !== false && mode !== 'original' && containsJapanese(line.text)) {
+        const origElem = document.createElement('div');
+        origElem.className = 'lyris-original-line';
+        origElem.textContent = line.text;
+        lineElem.appendChild(origElem);
+      }
+
+      // Line translation underneath if enabled
       if (settings.translationEnabled && line.translation) {
         const transElem = document.createElement('div');
-        transElem.className = 'am-line-translation';
+        transElem.className = 'lyris-translation-line am-line-translation';
         transElem.textContent = line.translation;
         lineElem.appendChild(transElem);
       }
 
-      if (settings.clickToSeek) {
+      if (settings.clickToSeek !== false) {
         lineElem.title = 'Click to seek • Alt+Click to calibrate audio sync';
         lineElem.addEventListener('click', (e) => {
           const video = document.querySelector('video');
@@ -2397,8 +2475,11 @@
           const eff = getEffectiveOffset();
           video.currentTime = Math.max(0, line.time - (eff / 1000));
           userScrolled = false;
-          const resumeBtn = document.getElementById('am-resume-scroll-btn');
-          if (resumeBtn) resumeBtn.classList.remove('visible');
+          const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+          if (resumeBtn) {
+            resumeBtn.hidden = true;
+            resumeBtn.classList.remove('visible');
+          }
           setActiveLine(index, true);
         });
       }
@@ -2406,13 +2487,8 @@
       fragment.appendChild(lineElem);
     });
 
-    // Bottom Lyrics Footer: Source Attribution
-    const hasJp = currentLyrics.lines.some(l => containsJapanese(l.text));
-    updateQuickToolsWidget(hasJp);
-
-    const footer = document.createElement('div');
-    footer.className = 'am-lyrics-footer';
-
+    // Provider Footer (Follows final lyric)
+    const trackInfo = getCurrentTrackInfo();
     let sourceDisplay = currentLyrics.source;
     if (sourceDisplay === 'native') sourceDisplay = 'YouTube Music';
     if (!sourceDisplay || sourceDisplay === 'none') sourceDisplay = 'Synced Engine';
@@ -2421,26 +2497,29 @@
     const sec = (eff / 1000).toFixed(1);
     const offsetLabel = (eff > 0 ? `+${sec}s` : `${sec}s`);
 
+    const footer = document.createElement('div');
+    footer.className = 'lyris-provider-foot am-lyrics-footer';
+
     footer.innerHTML = `
-      <div class="am-sync-nudge-bar">
-        <span class="am-sync-label">Sync:</span>
-        <button class="am-sync-nudge-btn" data-delta="-500" title="Shift lyrics earlier by 0.5s">-0.5s</button>
-        <button class="am-sync-nudge-btn" data-delta="-100" title="Shift lyrics earlier by 0.1s">-0.1s</button>
-        <span class="am-sync-val ${eff !== 0 ? 'has-custom' : ''}" id="am-current-track-sync-val">${offsetLabel}</span>
-        <button class="am-sync-nudge-btn" data-delta="100" title="Shift lyrics later by 0.1s">+0.1s</button>
-        <button class="am-sync-nudge-btn" data-delta="500" title="Shift lyrics later by 0.5s">+0.5s</button>
-        <button class="am-sync-reset-btn" id="am-sync-track-reset" title="Reset track audio sync" style="display: ${eff !== 0 ? 'inline-flex' : 'none'};">↺</button>
+      <div class="lyris-foot-source">
+        <strong>Lyrics by ${escapeHTML(sourceDisplay)}</strong>
+        <span>Estimated word & syllable timing • ${escapeHTML(trackInfo.cleanTitle || trackInfo.title || 'Track')}</span>
       </div>
-      <div class="am-footer-credit-line">
-        <span class="am-footer-dot"></span>
-        <span>Lyrics provided by ${escapeHTML(sourceDisplay)}</span>
+      <div class="lyris-foot-sync-row">
+        <span class="lyris-foot-sync-label">Sync:</span>
+        <button class="lyris-nudge-btn" data-delta="-500" title="Shift earlier 0.5s">-0.5s</button>
+        <button class="lyris-nudge-btn" data-delta="-100" title="Shift earlier 0.1s">-0.1s</button>
+        <span class="lyris-sync-val ${eff !== 0 ? 'has-custom' : ''}" id="lyris-foot-sync-val">${offsetLabel}</span>
+        <button class="lyris-nudge-btn" data-delta="100" title="Shift later 0.1s">+0.1s</button>
+        <button class="lyris-nudge-btn" data-delta="500" title="Shift later 0.5s">+0.5s</button>
+        <button class="lyris-nudge-reset" id="lyris-foot-sync-reset" title="Reset track audio sync" style="display: ${eff !== 0 ? 'inline-block' : 'none'};">↺</button>
       </div>
-      <div class="am-footer-actions">
-        <button class="am-footer-pill-btn" id="am-footer-settings-btn" title="Ambient Light & Lyrics Settings">⚙ Settings</button>
+      <div class="lyris-foot-actions">
+        <button class="lyris-foot-btn" id="lyris-foot-search-btn">Wrong song? Find another</button>
       </div>
     `;
 
-    footer.querySelectorAll('.am-sync-nudge-btn').forEach(btn => {
+    footer.querySelectorAll('.lyris-nudge-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const delta = parseInt(btn.dataset.delta, 10);
@@ -2448,63 +2527,71 @@
           adjustTrackOffset(delta);
           const current = getEffectiveOffset();
           const sign = current > 0 ? '+' : '';
+          const disp = document.getElementById('lyris-foot-sync-val');
+          if (disp) disp.textContent = `${sign}${(current / 1000).toFixed(1)}s`;
+          const rst = document.getElementById('lyris-foot-sync-reset');
+          if (rst) rst.style.display = current !== 0 ? 'inline-block' : 'none';
           showToast(`Audio sync: ${sign}${(current / 1000).toFixed(1)}s`);
         }
       });
     });
 
-    const resetTrackBtn = footer.querySelector('#am-sync-track-reset');
+    const resetTrackBtn = footer.querySelector('#lyris-foot-sync-reset');
     if (resetTrackBtn) {
       resetTrackBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         resetTrackOffset();
+        const disp = document.getElementById('lyris-foot-sync-val');
+        if (disp) disp.textContent = '0.0s';
+        resetTrackBtn.style.display = 'none';
         showToast('Audio sync reset to 0.0s');
       });
     }
 
-    const settingsBtn = footer.querySelector('#am-footer-settings-btn');
-    if (settingsBtn) {
-      settingsBtn.addEventListener('click', toggleIntegratedModal);
+    const wrongSongBtn = footer.querySelector('#lyris-foot-search-btn');
+    if (wrongSongBtn) {
+      wrongSongBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openSearchModal();
+      });
     }
 
     fragment.appendChild(footer);
-
-    const bottomSpace = document.createElement('div');
-    bottomSpace.className = 'am-lyric-line empty-space';
-    fragment.appendChild(bottomSpace);
-
     listContainer.appendChild(fragment);
+
     activeLineIndex = -1;
     updateActiveLine();
   }
 
   function renderStaticLyrics(plainText) {
-    const listContainer = document.getElementById('am-lyrics-list');
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!listContainer) return;
 
     listContainer.innerHTML = '';
+    listContainer.classList.add('lyris-plain');
 
+    const mode = settings.japaneseMode || 'furigana';
     const lines = plainText.split('\n');
     lines.forEach((rawText, idx) => {
       const trimmed = rawText.trim();
       const lineElem = document.createElement('div');
-      lineElem.className = 'am-lyric-line static-line';
-      lineElem.style.color = 'rgba(255, 255, 255, 0.85)';
-      lineElem.style.filter = 'none';
-      lineElem.style.cursor = 'default';
+      lineElem.className = 'lyris-line am-lyric-line static-line';
 
       const primary = document.createElement('div');
-      primary.className = 'am-line-primary';
-      if (settings.furiganaEnabled !== false && containsKanji(trimmed)) {
-        primary.innerHTML = addFurigana(trimmed);
-      } else {
-        primary.textContent = trimmed || '';
-      }
+      primary.className = 'lyris-line-primary am-line-primary';
+      primary.innerHTML = convertJapaneseLine(trimmed || '', mode);
       lineElem.appendChild(primary);
+
+      if (settings.showOriginal !== false && mode !== 'original' && containsJapanese(trimmed)) {
+        const origElem = document.createElement('div');
+        origElem.className = 'lyris-original-line';
+        origElem.textContent = trimmed;
+        lineElem.appendChild(origElem);
+      }
 
       if (settings.translationEnabled && currentLyrics.translations && currentLyrics.translations[idx]) {
         const transElem = document.createElement('div');
-        transElem.className = 'am-line-translation';
+        transElem.className = 'lyris-translation-line am-line-translation';
         transElem.textContent = currentLyrics.translations[idx];
         lineElem.appendChild(transElem);
       }
@@ -2513,98 +2600,41 @@
     });
 
     // Footer Attribution for Static Lyrics
-    const hasJp = containsJapanese(plainText);
-    updateQuickToolsWidget(hasJp);
-
     const footer = document.createElement('div');
-    footer.className = 'am-lyrics-footer';
+    footer.className = 'lyris-provider-foot am-lyrics-footer';
 
     let sourceDisplay = currentLyrics.source;
     if (sourceDisplay === 'native') sourceDisplay = 'YouTube Music';
-    if (!sourceDisplay || sourceDisplay === 'none') sourceDisplay = 'Standard Lyrics';
+    if (!sourceDisplay || sourceDisplay === 'none') sourceDisplay = 'Plain Lyrics';
 
     footer.innerHTML = `
-      <div class="am-footer-credit-line">
-        <span class="am-footer-dot"></span>
-        <span>Lyrics provided by ${escapeHTML(sourceDisplay)}</span>
+      <div class="lyris-foot-source">
+        <strong>Lyrics by ${escapeHTML(sourceDisplay)}</strong>
+        <span>Plain lyrics (Timestamps unavailable for this match)</span>
       </div>
-      <div class="am-footer-actions">
-        <button class="am-footer-pill-btn" id="am-footer-settings-btn" title="Ambient Light & Lyrics Settings">⚙ Settings</button>
+      <div class="lyris-foot-actions">
+        <button class="lyris-foot-btn" id="lyris-foot-find-synced-btn">Find synced lyrics</button>
+        <button class="lyris-foot-btn" id="lyris-foot-search-btn">Wrong song? Find another</button>
       </div>
     `;
 
-    const settingsBtn = footer.querySelector('#am-footer-settings-btn');
-    if (settingsBtn) settingsBtn.addEventListener('click', toggleIntegratedModal);
+    const findSyncedBtn = footer.querySelector('#lyris-foot-find-synced-btn');
+    if (findSyncedBtn) {
+      findSyncedBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadLyricsForCurrentTrack(true);
+      });
+    }
+
+    const wrongSongBtn = footer.querySelector('#lyris-foot-search-btn');
+    if (wrongSongBtn) {
+      wrongSongBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openSearchModal();
+      });
+    }
 
     listContainer.appendChild(footer);
-  }
-
-  function updateQuickToolsWidget(hasJp) {
-    const widget = document.getElementById('am-quick-tools-widget');
-    if (!widget) return;
-
-    const hasLyrics = (currentLyrics.lines && currentLyrics.lines.length > 0) || Boolean(currentLyrics.plainText);
-    if (!hasLyrics) {
-      widget.classList.remove('visible', 'expanded');
-      return;
-    }
-
-    widget.classList.add('visible');
-
-    const jpSection = document.getElementById('am-quick-jp-section');
-    const divider = document.getElementById('am-quick-divider');
-    const circleIcon = document.getElementById('am-quick-circle-icon');
-
-    if (hasJp) {
-      if (jpSection) jpSection.style.display = 'inline-flex';
-      if (divider) divider.style.display = 'block';
-      if (circleIcon) circleIcon.textContent = '文A';
-
-      const fBtn = document.getElementById('am-quick-furigana-btn');
-      if (fBtn) fBtn.classList.toggle('active', settings.furiganaEnabled !== false);
-
-      const tBtn = document.getElementById('am-quick-translate-btn');
-      if (tBtn) tBtn.classList.toggle('active', Boolean(settings.translationEnabled));
-
-      if (settings.translationEnabled && (!currentLyrics.translations || currentLyrics.translations.length === 0)) {
-        fetchTranslationForCurrentLyrics();
-      }
-    } else {
-      if (jpSection) jpSection.style.display = 'none';
-      if (divider) divider.style.display = 'none';
-      if (circleIcon) {
-        circleIcon.innerHTML = `
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-        `;
-      }
-    }
-
-    // Update sync offset value in quick bar
-    const quickVal = document.getElementById('am-quick-sync-val');
-    const quickReset = document.getElementById('am-quick-sync-reset');
-    const eff = getEffectiveOffset();
-    const sec = (eff / 1000).toFixed(1);
-    const label = (eff > 0 ? `+${sec}s` : `${sec}s`);
-
-    if (quickVal) {
-      quickVal.textContent = label;
-      if (eff !== 0) quickVal.classList.add('has-custom');
-      else quickVal.classList.remove('has-custom');
-    }
-
-    if (quickReset) {
-      quickReset.style.display = (eff !== 0 ? 'inline-flex' : 'none');
-    }
-
-    const styleBtn = document.getElementById('am-quick-style-btn');
-    if (styleBtn) {
-      const curStyle = HIGHLIGHT_STYLES.find(s => s.id === (settings.highlightStyle || 'apple-glow')) || HIGHLIGHT_STYLES[0];
-      styleBtn.textContent = curStyle.label;
-      styleBtn.title = `Style: ${curStyle.fullName} (Click to switch)`;
-    }
   }
 
   function updateActiveLine() {
@@ -2628,20 +2658,19 @@
       setActiveLine(newIndex, true);
     }
 
-    // Update word-by-word / syllable karaoke highlight on active line
     if (activeLineIndex >= 0 && settings.lineHighlight !== false && settings.wordHighlight !== false) {
       updateActiveLineWordHighlight(currentTime);
     }
   }
 
   function updateActiveLineWordHighlight(currentTime) {
-    const activeElem = document.querySelector(`.am-lyric-line[data-index="${activeLineIndex}"]`);
+    const activeElem = document.querySelector(`.lyris-line[data-index="${activeLineIndex}"], .am-lyric-line[data-index="${activeLineIndex}"]`);
     if (!activeElem) return;
 
     const lineData = currentLyrics.lines[activeLineIndex];
     if (!lineData || !lineData.wordTimings) return;
 
-    const wordSpans = activeElem.querySelectorAll('.am-word');
+    const wordSpans = activeElem.querySelectorAll('.lyris-word, .am-word');
     wordSpans.forEach(span => {
       const wIdx = parseInt(span.dataset.wordIdx, 10);
       const w = lineData.wordTimings[wIdx];
@@ -2649,57 +2678,49 @@
 
       const dur = Math.max(0.05, w.duration || 0.2);
       const percent = Math.max(0, Math.min(100, ((currentTime - w.time) / dur) * 100));
-      span.style.setProperty('--am-word-fill', `${percent.toFixed(2)}%`);
+      span.style.setProperty('--fill', `${percent.toFixed(1)}%`);
+      span.style.setProperty('--ly-word-fill', `${percent.toFixed(1)}%`);
+      span.style.setProperty('--am-word-fill', `${percent.toFixed(1)}%`);
 
       if (currentTime >= w.time + w.duration) {
         span.classList.add('sung');
-        span.classList.remove('singing');
+        span.classList.remove('live', 'singing');
       } else if (currentTime >= w.time && currentTime < w.time + w.duration) {
-        span.classList.add('singing');
+        span.classList.add('live', 'singing');
         span.classList.remove('sung');
       } else {
-        span.classList.remove('sung');
-        span.classList.remove('singing');
+        span.classList.remove('sung', 'live', 'singing');
       }
     });
   }
 
   function setActiveLine(newIndex, shouldScroll = true) {
     activeLineIndex = newIndex;
-    const lines = document.querySelectorAll('.am-lyric-line[data-index]');
+    const lines = document.querySelectorAll('.lyris-line[data-index], .am-lyric-line[data-index]');
 
     lines.forEach((elem) => {
       const idx = parseInt(elem.dataset.index, 10);
-      const wordSpans = elem.querySelectorAll('.am-word');
+      const wordSpans = elem.querySelectorAll('.lyris-word, .am-word');
 
       if (idx === activeLineIndex) {
-        if (settings.lineHighlight !== false) {
-          elem.classList.add('active');
-          elem.classList.remove('passed');
-          if (settings.wordHighlight === false) {
-            elem.classList.add('no-word-sync');
-          } else {
-            elem.classList.remove('no-word-sync');
-          }
-        } else {
-          elem.classList.remove('active', 'passed', 'no-word-sync');
-        }
+        elem.classList.add('current', 'active');
+        elem.classList.remove('past', 'passed');
       } else if (idx < activeLineIndex) {
-        if (settings.lineHighlight !== false) {
-          elem.classList.remove('active', 'no-word-sync');
-          elem.classList.add('passed');
-        } else {
-          elem.classList.remove('active', 'passed', 'no-word-sync');
-        }
+        elem.classList.remove('current', 'active');
+        elem.classList.add('past', 'passed');
         wordSpans.forEach(w => {
           w.classList.add('sung');
-          w.classList.remove('singing');
+          w.classList.remove('live', 'singing');
+          w.style.setProperty('--fill', '100%');
+          w.style.setProperty('--ly-word-fill', '100%');
           w.style.setProperty('--am-word-fill', '100%');
         });
       } else {
-        elem.classList.remove('active', 'passed', 'no-word-sync');
+        elem.classList.remove('current', 'active', 'past', 'passed');
         wordSpans.forEach(w => {
-          w.classList.remove('sung', 'singing');
+          w.classList.remove('sung', 'live', 'singing');
+          w.style.setProperty('--fill', '0%');
+          w.style.setProperty('--ly-word-fill', '0%');
           w.style.setProperty('--am-word-fill', '0%');
         });
       }
@@ -2712,18 +2733,20 @@
 
   function scrollToActiveLine(smooth = true) {
     if (activeLineIndex < 0) return;
-    const activeElem = document.querySelector(`.am-lyric-line[data-index="${activeLineIndex}"]`);
+    const activeElem = document.querySelector(`.lyris-line[data-index="${activeLineIndex}"], .am-lyric-line[data-index="${activeLineIndex}"]`);
     if (!activeElem) return;
 
-    const scrollContainer = document.getElementById('am-lyrics-scroll-container');
+    const scrollContainer = document.getElementById('lyris-scroll') || document.getElementById('am-lyrics-scroll-container');
     let scrolled = false;
 
-    // 1. Scroll internal lyrics container if it has overflow
+    // Follow offset geometry contract:
+    // followY = clamp(scrollContainer.clientHeight * 0.24, 80px, 120px)
     if (scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight + 10) {
       const containerRect = scrollContainer.getBoundingClientRect();
       const elemRect = activeElem.getBoundingClientRect();
-      const relativeTop = elemRect.top - containerRect.top;
-      const targetScroll = Math.round(scrollContainer.scrollTop + relativeTop - (scrollContainer.clientHeight / 2) + (elemRect.height / 2));
+      const relativeTop = (elemRect.top + elemRect.height / 2) - containerRect.top;
+      const followY = Math.min(120, Math.max(80, scrollContainer.clientHeight * 0.24));
+      const targetScroll = Math.round(scrollContainer.scrollTop + relativeTop - followY);
 
       scrollContainer.scrollTo({
         top: Math.max(0, targetScroll),
@@ -2733,7 +2756,6 @@
     }
 
     if (!scrolled) {
-      // 2. Also check if an outer ancestor (ytmusic-tab-renderer, #side-panel, etc.) has overflow
       let parent = (scrollContainer || activeElem).parentElement;
       while (parent && parent !== document.body && parent !== document.documentElement) {
         if (parent.scrollHeight > parent.clientHeight + 10) {
@@ -2741,8 +2763,9 @@
           if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
             const parentRect = parent.getBoundingClientRect();
             const elemRect = activeElem.getBoundingClientRect();
-            const relativeTop = elemRect.top - parentRect.top;
-            const targetScroll = Math.round(parent.scrollTop + relativeTop - (parent.clientHeight / 2) + (elemRect.height / 2));
+            const relativeTop = (elemRect.top + elemRect.height / 2) - parentRect.top;
+            const followY = Math.min(120, Math.max(80, parent.clientHeight * 0.24));
+            const targetScroll = Math.round(parent.scrollTop + relativeTop - followY);
             parent.scrollTo({
               top: Math.max(0, targetScroll),
               behavior: smooth ? 'smooth' : 'auto'
@@ -2753,17 +2776,6 @@
         }
         parent = parent.parentElement;
       }
-    }
-
-    // 3. Fallback only if no scroll container handled it
-    if (!scrolled) {
-      try {
-        activeElem.scrollIntoView({
-          behavior: smooth ? 'smooth' : 'auto',
-          block: 'center',
-          inline: 'nearest'
-        });
-      } catch (e) {}
     }
   }
 
@@ -3155,9 +3167,9 @@
       const isSelected = isLyricsTabSelected();
       if (isSelected) {
         const shelf = getNativeLyricsShelf();
-        const wrapper = document.getElementById('am-lyrics-wrapper');
+        const wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
         const customRenderer = document.getElementById('am-custom-lyrics-tab-renderer');
-        const list = document.getElementById('am-lyrics-list');
+        const list = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
 
         if (shelf) {
           if (!wrapper || !wrapper.isConnected || !shelf.contains(wrapper)) {
