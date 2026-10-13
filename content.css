@@ -109,12 +109,12 @@ yt-img-shadow#song-image img {
 /* Multi-layer projector container (anchored to video player, perimeter edge extension with rightward spread) */
 #am-player-ambient-wrapper {
   position: absolute;
-  top: -15%;
-  bottom: -15%;
-  left: -15%;
-  right: calc(-15% - (var(--am-spread) * 75%));
-  width: calc(100% + 30% + (var(--am-spread) * 75%));
-  height: calc(100% + 30%);
+  top: calc(-20% - (var(--am-spread) * 35%));
+  bottom: calc(-20% - (var(--am-spread) * 35%));
+  left: calc(-15% - (var(--am-spread) * 25%));
+  right: calc(-20% - (var(--am-spread) * 75%));
+  width: calc(100% + 35% + (var(--am-spread) * 100%));
+  height: calc(100% + 40% + (var(--am-spread) * 70%));
   pointer-events: none;
   z-index: 0;
   display: block;
@@ -125,9 +125,12 @@ yt-img-shadow#song-image img {
 /* Symmetrical spread when side panel is absent / collapsed / hidden */
 ytmusic-player-page:not(:has(#side-panel:not([collapsed]):not([hidden]))) #am-player-ambient-wrapper,
 body:not(:has(#side-panel:not([collapsed]):not([hidden]))) #am-player-ambient-wrapper {
-  right: calc(-15% - (var(--am-spread) * 30%));
-  left: calc(-15% - (var(--am-spread) * 30%));
-  width: calc(100% + 30% + (var(--am-spread) * 60%));
+  top: calc(-20% - (var(--am-spread) * 35%));
+  bottom: calc(-20% - (var(--am-spread) * 35%));
+  left: calc(-20% - (var(--am-spread) * 45%));
+  right: calc(-20% - (var(--am-spread) * 45%));
+  width: calc(100% + 40% + (var(--am-spread) * 90%));
+  height: calc(100% + 40% + (var(--am-spread) * 70%));
 }
 
 /* Level 1: Inner Tight Edge Definition */

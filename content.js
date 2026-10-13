@@ -494,8 +494,8 @@
         for (let i = 1; i <= 3; i++) {
           const cvs = document.createElement('canvas');
           cvs.className = `am-projector-layer-${i}`;
-          cvs.width = 480;
-          cvs.height = 270;
+          cvs.width = 640;
+          cvs.height = 360;
           const ctx = cvs.getContext('2d', { alpha: false, willReadFrequently: false });
           wrapper.appendChild(cvs);
           this.layers.push({ cvs, ctx });
@@ -589,29 +589,31 @@
       const spreadRatio = (spreadVal || 42) / 100.0;
 
       // Mathematical anchor coordinates matching DOM layout
+      // Deep vertical spread allows top and bottom to spread outward across the entire page
+      const denom_h = 1.40 + spreadRatio * 0.70;
       let vx, vy, vw, vh;
       if (hasSidePanel) {
-        // Video/Art on center-left, extended rightward spread for lyrics (matches user drawing Untitled.png)
-        const denom = 1.30 + spreadRatio * 0.75;
-        vx = Math.round(targetW * (0.15 / denom));
-        vw = Math.round(targetW * (1.00 / denom));
-        vy = Math.round(targetH * (0.15 / 1.30));
-        vh = Math.round(targetH * (1.00 / 1.30));
+        // Video/Art on center-left, extended rightward spread for lyrics
+        const denom_w = 1.35 + spreadRatio * 1.00;
+        vx = Math.round(targetW * ((0.15 + spreadRatio * 0.25) / denom_w));
+        vw = Math.round(targetW * (1.00 / denom_w));
+        vy = Math.round(targetH * ((0.20 + spreadRatio * 0.35) / denom_h));
+        vh = Math.round(targetH * (1.00 / denom_h));
       } else {
         // Symmetrical layout when side panel is absent
-        const denom = 1.30 + spreadRatio * 0.30;
-        vx = Math.round(targetW * (0.15 / denom));
-        vw = Math.round(targetW * (1.00 / denom));
-        vy = Math.round(targetH * (0.15 / 1.30));
-        vh = Math.round(targetH * (1.00 / 1.30));
+        const denom_w = 1.40 + spreadRatio * 0.90;
+        vx = Math.round(targetW * ((0.20 + spreadRatio * 0.45) / denom_w));
+        vw = Math.round(targetW * (1.00 / denom_w));
+        vy = Math.round(targetH * ((0.20 + spreadRatio * 0.35) / denom_h));
+        vh = Math.round(targetH * (1.00 / denom_h));
       }
 
-      // Sample edge depths (5% of source frame)
-      const dx = Math.max(3, Math.round(sw * 0.05));
-      const dy = Math.max(3, Math.round(sh * 0.05));
+      // Sample edge depths (4% of source frame for fine perimeter sampling)
+      const dx = Math.max(2, Math.round(sw * 0.04));
+      const dy = Math.max(2, Math.round(sh * 0.04));
 
-      // Calculate number of bands based on ambientSpread
-      const numBands = Math.max(3, Math.min(16, Math.round((spreadVal || 42) / 15) + 1));
+      // High-density edge count: fine, dense bands (30 to 80 bands) for dense edge expansion
+      const numBands = Math.max(30, Math.min(80, Math.round((spreadVal || 42) * 0.45) + 16));
 
       // Draw concentric bands from outer to inner
       for (let k = numBands; k >= 1; k--) {
@@ -660,7 +662,7 @@
 
         // When blur is 0% (as shown in reference screenshot and user drawing), render subtle band boundary
         if ((blurVal || 0) === 0) {
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
           ctx.lineWidth = 1;
           ctx.strokeRect(bx1, by1, bx2 - bx1, by2 - by1);
         }
