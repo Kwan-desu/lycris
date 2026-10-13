@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
   ambientEnabled: true,
   ambientBlur: 70,
   ambientSpread: 42,
-  ambientFadeDuration: 0,
+  ambientFadeDuration: 0.15,
   ambientBrightness: 95,
   ambientSaturation: 120,
 
@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   appleMode: true,
   lineHighlight: true,
   wordHighlight: true,
+  highlightStyle: 'apple-glow',
   japaneseMode: 'furigana', // 'furigana' | 'original' | 'romaji' | 'hiragana' | 'katakana'
   showOriginal: true,
   furiganaEnabled: true,
@@ -114,13 +115,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load Settings from storage
   chrome.storage.sync.get(DEFAULT_SETTINGS, (stored) => {
-    settings = { ...DEFAULT_SETTINGS, ...stored };
-    updateUI();
+    if (stored) {
+      settings = { ...DEFAULT_SETTINGS, ...stored };
+      updateUI();
+    }
   });
 
-  function save(key, val) {
+  // Listen for storage changes from in-page settings
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync') {
+        for (let key in changes) {
+          settings[key] = changes[key].newValue;
+        }
+        updateUI();
+      }
+    });
+  }
+
+  const _saveTimers = {};
+  function save(key, val, debounceMs = 0) {
     settings[key] = val;
-    chrome.storage.sync.set({ [key]: val });
+    const persist = () => {
+      chrome.storage.sync.set({ [key]: val });
+    };
+    if (debounceMs > 0) {
+      clearTimeout(_saveTimers[key]);
+      _saveTimers[key] = setTimeout(persist, debounceMs);
+    } else {
+      persist();
+    }
   }
 
   function updateUI() {
@@ -140,27 +164,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Light
     ambientEnabledToggle.checked = settings.ambientEnabled !== false;
-    ambientBrightnessSlider.value = settings.ambientBrightness || 95;
-    ambientBrightnessVal.textContent = `${settings.ambientBrightness || 95}%`;
-    ambientBlurSlider.value = settings.ambientBlur !== undefined ? settings.ambientBlur : 70;
-    ambientBlurVal.textContent = `${settings.ambientBlur !== undefined ? settings.ambientBlur : 70}%`;
-    ambientSpreadSlider.value = settings.ambientSpread !== undefined ? settings.ambientSpread : 42;
-    ambientSpreadVal.textContent = `${settings.ambientSpread !== undefined ? settings.ambientSpread : 42}%`;
+    const brightness = (typeof settings.ambientBrightness === 'number') ? settings.ambientBrightness : (settings.ambientIntensity ?? 95);
+    ambientBrightnessSlider.value = brightness;
+    ambientBrightnessVal.textContent = `${brightness}%`;
 
-    const fade = settings.ambientFadeDuration || 0;
+    const blur = (typeof settings.ambientBlur === 'number') ? settings.ambientBlur : 70;
+    ambientBlurSlider.value = blur;
+    ambientBlurVal.textContent = `${blur}px`;
+
+    const spread = (typeof settings.ambientSpread === 'number') ? settings.ambientSpread : 42;
+    ambientSpreadSlider.value = spread;
+    ambientSpreadVal.textContent = `${spread}%`;
+
+    const fade = (typeof settings.ambientFadeDuration === 'number') ? settings.ambientFadeDuration : 0.15;
     ambientFadeSlider.value = fade;
-    ambientFadeVal.textContent = fade === 0 ? 'Off' : `${fade}s`;
+    ambientFadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
 
-    ambientSaturationSlider.value = settings.ambientSaturation || 120;
-    ambientSaturationVal.textContent = `${settings.ambientSaturation || 120}%`;
+    const sat = (typeof settings.ambientSaturation === 'number') ? settings.ambientSaturation : 120;
+    ambientSaturationSlider.value = sat;
+    ambientSaturationVal.textContent = `${sat}%`;
 
     renderProviders();
   }
 
   function renderProviders() {
     providerListContainer.innerHTML = '';
-    const order = settings.providerOrder || DEFAULT_SETTINGS.providerOrder;
-    const enabled = settings.enabledProviders || DEFAULT_SETTINGS.enabledProviders;
+    const order = settings.providerOrder ? [...settings.providerOrder] : [...DEFAULT_SETTINGS.providerOrder];
+    const enabled = settings.enabledProviders ? { ...settings.enabledProviders } : { ...DEFAULT_SETTINGS.enabledProviders };
 
     order.forEach((id, index) => {
       const item = document.createElement('div');
@@ -173,7 +203,8 @@ document.addEventListener('DOMContentLoaded', () => {
       check.type = 'checkbox';
       check.checked = enabled[id] !== false;
       check.addEventListener('change', () => {
-        settings.enabledProviders[id] = check.checked;
+        enabled[id] = check.checked;
+        settings.enabledProviders = enabled;
         save('enabledProviders', settings.enabledProviders);
       });
 
@@ -246,7 +277,11 @@ document.addEventListener('DOMContentLoaded', () => {
   fontSizeSlider.addEventListener('input', () => {
     const val = parseInt(fontSizeSlider.value, 10);
     fontSizeVal.textContent = `${val}px`;
-    save('fontSize', val);
+    save('fontSize', val, 250);
+  });
+  fontSizeSlider.addEventListener('change', () => {
+    const val = parseInt(fontSizeSlider.value, 10);
+    save('fontSize', val, 0);
   });
 
   wordHighlightToggle.addEventListener('change', () => {
@@ -264,7 +299,11 @@ document.addEventListener('DOMContentLoaded', () => {
   syncOffsetSlider.addEventListener('input', () => {
     const val = parseInt(syncOffsetSlider.value, 10);
     syncOffsetVal.textContent = `${(val / 1000).toFixed(1)}s`;
-    save('syncOffset', val);
+    save('syncOffset', val, 250);
+  });
+  syncOffsetSlider.addEventListener('change', () => {
+    const val = parseInt(syncOffsetSlider.value, 10);
+    save('syncOffset', val, 0);
   });
 
   btnOffsetMinus.addEventListener('click', () => {
@@ -297,31 +336,51 @@ document.addEventListener('DOMContentLoaded', () => {
   ambientBrightnessSlider.addEventListener('input', () => {
     const val = parseInt(ambientBrightnessSlider.value, 10);
     ambientBrightnessVal.textContent = `${val}%`;
-    save('ambientBrightness', val);
+    save('ambientBrightness', val, 250);
+  });
+  ambientBrightnessSlider.addEventListener('change', () => {
+    const val = parseInt(ambientBrightnessSlider.value, 10);
+    save('ambientBrightness', val, 0);
   });
 
   ambientBlurSlider.addEventListener('input', () => {
     const val = parseInt(ambientBlurSlider.value, 10);
-    ambientBlurVal.textContent = `${val}%`;
-    save('ambientBlur', val);
+    ambientBlurVal.textContent = `${val}px`;
+    save('ambientBlur', val, 250);
+  });
+  ambientBlurSlider.addEventListener('change', () => {
+    const val = parseInt(ambientBlurSlider.value, 10);
+    save('ambientBlur', val, 0);
   });
 
   ambientSpreadSlider.addEventListener('input', () => {
     const val = parseInt(ambientSpreadSlider.value, 10);
     ambientSpreadVal.textContent = `${val}%`;
-    save('ambientSpread', val);
+    save('ambientSpread', val, 250);
+  });
+  ambientSpreadSlider.addEventListener('change', () => {
+    const val = parseInt(ambientSpreadSlider.value, 10);
+    save('ambientSpread', val, 0);
   });
 
   ambientFadeSlider.addEventListener('input', () => {
     const val = parseFloat(ambientFadeSlider.value);
-    ambientFadeVal.textContent = val === 0 ? 'Off' : `${val.toFixed(1)}s`;
-    save('ambientFadeDuration', val);
+    ambientFadeVal.textContent = val === 0 ? 'Off' : `${val.toFixed(2)}s`;
+    save('ambientFadeDuration', val, 250);
+  });
+  ambientFadeSlider.addEventListener('change', () => {
+    const val = parseFloat(ambientFadeSlider.value);
+    save('ambientFadeDuration', val, 0);
   });
 
   ambientSaturationSlider.addEventListener('input', () => {
     const val = parseInt(ambientSaturationSlider.value, 10);
     ambientSaturationVal.textContent = `${val}%`;
-    save('ambientSaturation', val);
+    save('ambientSaturation', val, 250);
+  });
+  ambientSaturationSlider.addEventListener('change', () => {
+    const val = parseInt(ambientSaturationSlider.value, 10);
+    save('ambientSaturation', val, 0);
   });
 
   // Section Resets
@@ -385,16 +444,22 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Query Current Track Info from YouTube Music tab
-  chrome.tabs.query({ url: '*://music.youtube.com/*' }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'GET_TRACK_INFO' }, (res) => {
-        if (res && res.trackInfo && res.trackInfo.title) {
-          trackTitle.textContent = res.trackInfo.title;
-          trackArtist.textContent = res.trackInfo.artist || 'Unknown Artist';
-          trackBadge.classList.add('active');
-          trackBadgeText.textContent = res.currentLyrics && res.currentLyrics.isSynced ? 'Synced' : 'Active';
-        }
-      });
-    }
-  });
+  function updateTrackCard() {
+    chrome.tabs.query({ url: '*://music.youtube.com/*' }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.sendMessage(tabs[0].id, { action: 'GET_STATUS' }, (res) => {
+          if (chrome.runtime.lastError || !res) return;
+          const track = res.trackInfo || res.track;
+          if (track && track.title) {
+            trackTitle.textContent = track.title;
+            trackArtist.textContent = track.artist || 'Unknown Artist';
+            trackBadge.classList.add('active');
+            const isSynced = res.isSynced || (res.currentLyrics && res.currentLyrics.isSynced);
+            trackBadgeText.textContent = isSynced ? 'Synced' : 'Active';
+          }
+        });
+      }
+    });
+  }
+  updateTrackCard();
 });

@@ -10,11 +10,11 @@
   const DEFAULT_SETTINGS = {
     // Ambient Light
     ambientEnabled: true,
-    ambientBlur: 70, // 70%
-    ambientSpread: 42, // 42%
-    ambientFadeDuration: 0, // 0 = Off
     ambientBrightness: 95, // 95%
+    ambientSpread: 42, // 42%
+    ambientBlur: 70, // 70px
     ambientSaturation: 120, // 120%
+    ambientFadeDuration: 0.15, // 0.15s (0 = Off)
 
     // Provider Priority
     providerOrder: ['lrclib', 'netease', 'kugou', 'qq', 'youtube-cc', 'native'],
@@ -98,6 +98,12 @@
         chrome.storage.sync.get(DEFAULT_SETTINGS, (stored) => {
           if (stored) {
             settings = { ...DEFAULT_SETTINGS, ...stored };
+            if (stored.ambientIntensity !== undefined && stored.ambientBrightness === undefined) {
+              settings.ambientBrightness = stored.ambientIntensity;
+            }
+            if (stored.ambientLighting !== undefined && stored.ambientEnabled === undefined) {
+              settings.ambientEnabled = stored.ambientLighting;
+            }
             if (settings.highlightStyle === 'color-neon') {
               settings.highlightStyle = 'gradient-wipe';
             }
@@ -108,6 +114,7 @@
               settings.japaneseMode = stored.japaneseMode;
             }
             applySettingsToDOM();
+            updateLyrisSettingsUI();
           }
         });
       } catch (e) {}
@@ -122,10 +129,25 @@
 
         for (let key in changes) {
           settings[key] = changes[key].newValue;
+          if (key === 'ambientIntensity' && changes.ambientBrightness === undefined) {
+            settings.ambientBrightness = changes.ambientIntensity.newValue;
+          }
+          if (key === 'ambientBrightness') {
+            settings.ambientIntensity = changes.ambientBrightness.newValue;
+          }
+          if (key === 'ambientLighting' && changes.ambientEnabled === undefined) {
+            settings.ambientEnabled = changes.ambientLighting.newValue;
+          }
+          if (key === 'ambientEnabled') {
+            settings.ambientLighting = changes.ambientEnabled.newValue;
+          }
           if (key === 'providerOrder' || key === 'enabledProviders') {
             lyricsNeedReload = true;
           }
-          if (key === 'japaneseMode' || key === 'showOriginal' || key === 'furiganaEnabled' || key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' || key === 'lineHighlight' || key === 'highlightStyle') {
+          if (key === 'japaneseMode' || key === 'showOriginal' || key === 'furiganaEnabled' ||
+              key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' ||
+              key === 'lineHighlight' || key === 'highlightStyle' || key === 'clickToSeek' ||
+              key === 'lyricsEnabled' || key === 'appleMode') {
             lyricsNeedRerender = true;
             if (key === 'translationEnabled' && changes.translationEnabled.newValue) {
               fetchTranslationForCurrentLyrics();
@@ -136,12 +158,33 @@
         applySettingsToDOM();
         updateLyrisSettingsUI();
 
+        if (typeof ambientEngine !== 'undefined' && ambientEngine) {
+          if (changes.ambientEnabled || changes.ambientLighting) {
+            ambientEngine.toggle((settings.ambientEnabled ?? settings.ambientLighting) !== false);
+          }
+          if (changes.ambientBrightness || changes.ambientIntensity) {
+            ambientEngine.updateBrightness(settings.ambientBrightness ?? settings.ambientIntensity ?? 95);
+          }
+          if (changes.ambientSpread) {
+            ambientEngine.updateSpread(settings.ambientSpread ?? 42);
+          }
+          if (changes.ambientBlur) {
+            ambientEngine.updateBlur(settings.ambientBlur ?? 70);
+          }
+          if (changes.ambientSaturation) {
+            ambientEngine.updateSaturation(settings.ambientSaturation ?? 120);
+          }
+          if (changes.ambientFadeDuration) {
+            ambientEngine.updateFadeDuration(settings.ambientFadeDuration ?? 0.15);
+          }
+        }
+
         if (lyricsNeedReload) {
           lyricsCache.clear();
           safeSendMessage({ action: 'CLEAR_CACHE' });
           loadLyricsForCurrentTrack(true);
         } else if (lyricsNeedRerender) {
-          renderLyricsUI();
+          renderCurrentLyricsState();
           updateActiveLine();
         } else if (changes.trackOffsets || changes.syncOffset) {
           updateSyncDisplay();
@@ -154,13 +197,15 @@
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     try {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-        if (request.action === 'GET_STATUS') {
+        if (request.action === 'GET_STATUS' || request.action === 'GET_TRACK_INFO') {
           const metadata = getCurrentTrackInfo();
           sendResponse({
             track: metadata,
+            trackInfo: metadata,
+            currentLyrics: currentLyrics,
             lyricsSource: currentLyrics.source,
-            isSynced: currentLyrics.isSynced,
-            lineCount: currentLyrics.lines.length,
+            isSynced: Boolean(currentLyrics.isSynced),
+            lineCount: currentLyrics.lines ? currentLyrics.lines.length : 0,
             settings: settings
           });
         } else if (request.action === 'SET_OFFSET') {
@@ -174,21 +219,31 @@
     } catch (e) {}
   }
 
-  function saveSetting(key, val) {
+  const _saveDebounceTimers = {};
+  function saveSetting(key, val, debounceMs = 0) {
     settings[key] = val;
-    if (isExtensionValid() && chrome.storage && chrome.storage.sync) {
-      try {
-        chrome.storage.sync.set({ [key]: val });
-      } catch (e) {}
-    }
     applySettingsToDOM();
-    if (key === 'furiganaEnabled' || key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' || key === 'lineHighlight' || key === 'highlightStyle') {
-      if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
-        renderLyricsUI();
-        updateActiveLine();
-      } else if (currentLyrics.plainText) {
-        renderStaticLyrics(currentLyrics.plainText);
+    if (key === 'japaneseMode' || key === 'showOriginal' || key === 'furiganaEnabled' ||
+        key === 'translationEnabled' || key === 'fontSize' || key === 'wordHighlight' ||
+        key === 'lineHighlight' || key === 'highlightStyle' || key === 'clickToSeek' ||
+        key === 'lyricsEnabled' || key === 'appleMode') {
+      renderCurrentLyricsState();
+      updateActiveLine();
+    }
+
+    const persist = () => {
+      if (isExtensionValid() && chrome.storage && chrome.storage.sync) {
+        try {
+          chrome.storage.sync.set({ [key]: val });
+        } catch (e) {}
       }
+    };
+
+    if (debounceMs > 0) {
+      clearTimeout(_saveDebounceTimers[key]);
+      _saveDebounceTimers[key] = setTimeout(persist, debounceMs);
+    } else {
+      persist();
     }
   }
 
@@ -264,25 +319,28 @@
 
   function applySettingsToDOM() {
     const root = document.documentElement;
-    // Map blur percentage (0-100%) to px (0-120px)
-    const blurPx = Math.round((settings.ambientBlur / 100) * 120);
-    // Map spread percentage (0-300%) to decimal ratio (0.0 to 3.0)
-    const spreadRatio = (settings.ambientSpread / 100).toFixed(2);
-    // Backward compatibility scale (1.0 to 2.5)
-    const spreadScale = (1.0 + (settings.ambientSpread / 100) * 0.5).toFixed(3);
 
-    root.style.setProperty('--ly-font-size', `${settings.fontSize}px`);
-    root.style.setProperty('--am-font-size', `${settings.fontSize}px`);
+    const blurPx = (typeof settings.ambientBlur === 'number') ? settings.ambientBlur : 70;
+    const spreadVal = (typeof settings.ambientSpread === 'number') ? settings.ambientSpread : 42;
+    const spreadRatio = (spreadVal / 100).toFixed(2);
+    const spreadScale = (1.0 + (spreadVal / 100) * 0.5).toFixed(3);
+    const brightnessVal = (typeof settings.ambientBrightness === 'number') ? settings.ambientBrightness : (settings.ambientIntensity ?? 95);
+    const satVal = (typeof settings.ambientSaturation === 'number') ? settings.ambientSaturation : 120;
+    const fadeVal = (typeof settings.ambientFadeDuration === 'number') ? settings.ambientFadeDuration : 0.15;
+    const fontVal = (typeof settings.fontSize === 'number') ? settings.fontSize : 40;
+
+    root.style.setProperty('--ly-font-size', `${fontVal}px`);
+    root.style.setProperty('--am-font-size', `${fontVal}px`);
     root.style.setProperty('--am-blur', `${blurPx}px`);
     root.style.setProperty('--am-spread', spreadRatio);
     root.style.setProperty('--am-spread-scale', spreadScale);
-    root.style.setProperty('--am-brightness', `${settings.ambientBrightness}%`);
-    root.style.setProperty('--am-saturation', `${settings.ambientSaturation}%`);
-    root.style.setProperty('--am-fade-duration', settings.ambientFadeDuration > 0 ? `${settings.ambientFadeDuration}s` : '0s');
+    root.style.setProperty('--am-brightness', `${brightnessVal}%`);
+    root.style.setProperty('--am-saturation', `${satVal}%`);
+    root.style.setProperty('--am-fade-duration', fadeVal > 0 ? `${fadeVal}s` : '0s');
 
     const playerAmbient = document.getElementById('am-player-ambient-wrapper');
     if (playerAmbient) {
-      playerAmbient.style.display = settings.ambientEnabled ? 'block' : 'none';
+      playerAmbient.style.display = (settings.ambientEnabled !== false) ? 'block' : 'none';
     }
 
     const pageAmbient = document.getElementById('am-page-ambient-backdrop');
@@ -308,7 +366,7 @@
     const wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
     if (wrapper) {
       wrapper.dataset.highlightStyle = settings.highlightStyle || 'apple-glow';
-      wrapper.hidden = !settings.lyricsEnabled;
+      wrapper.hidden = !isCustomActive;
     }
 
     if (typeof ambientEngine !== 'undefined' && ambientEngine) {
@@ -916,6 +974,42 @@
           );
         }
       }
+    }
+
+    toggle(enabled) {
+      settings.ambientEnabled = Boolean(enabled);
+      applySettingsToDOM();
+      if (settings.ambientEnabled) {
+        this.drawFrame(true);
+      }
+    }
+
+    updateBrightness(val) {
+      settings.ambientBrightness = parseInt(val, 10);
+      applySettingsToDOM();
+      this.drawFrame(true);
+    }
+
+    updateSpread(val) {
+      settings.ambientSpread = parseFloat(val);
+      applySettingsToDOM();
+      this.drawFrame(true);
+    }
+
+    updateBlur(val) {
+      settings.ambientBlur = parseInt(val, 10);
+      applySettingsToDOM();
+      this.drawFrame(true);
+    }
+
+    updateSaturation(val) {
+      settings.ambientSaturation = parseInt(val, 10);
+      applySettingsToDOM();
+    }
+
+    updateFadeDuration(val) {
+      settings.ambientFadeDuration = parseFloat(val);
+      applySettingsToDOM();
     }
   }
 
@@ -1742,6 +1836,10 @@
         <!-- Lyrics Pane -->
         <div class="lyris-pane" id="lyris-pane-lyrics">
           <label class="lyris-setting">
+            <span>Synced lyrics</span>
+            <input type="checkbox" id="lyris-opt-lyrics-enabled">
+          </label>
+          <label class="lyris-setting">
             <span>Japanese script</span>
             <select id="lyris-opt-japanese-mode">
               <option value="furigana">Furigana</option>
@@ -1788,21 +1886,21 @@
               <span>Intensity</span>
               <output id="lyris-intensity-val">95%</output>
             </div>
-            <input type="range" id="lyris-opt-intensity" min="30" max="150" step="5" value="95">
+            <input type="range" id="lyris-opt-intensity" min="25" max="150" step="5" value="95">
           </div>
           <div class="lyris-setting-range">
             <div class="lyris-range-label">
               <span>Spread</span>
-              <output id="lyris-spread-val">1.35x</output>
+              <output id="lyris-spread-val">42%</output>
             </div>
-            <input type="range" id="lyris-opt-spread" min="0.8" max="2.2" step="0.05" value="1.35">
+            <input type="range" id="lyris-opt-spread" min="0" max="200" step="1" value="42">
           </div>
           <div class="lyris-setting-range">
             <div class="lyris-range-label">
               <span>Blur</span>
               <output id="lyris-blur-val">70px</output>
             </div>
-            <input type="range" id="lyris-opt-blur" min="20" max="140" step="5" value="70">
+            <input type="range" id="lyris-opt-blur" min="0" max="140" step="5" value="70">
           </div>
           <div class="lyris-setting-range">
             <div class="lyris-range-label">
@@ -1816,7 +1914,7 @@
               <span>Fade duration</span>
               <output id="lyris-fade-val">0.15s</output>
             </div>
-            <input type="range" id="lyris-opt-fade" min="0.05" max="0.5" step="0.05" value="0.15">
+            <input type="range" id="lyris-opt-fade" min="0" max="1.5" step="0.05" value="0.15">
           </div>
           <button class="lyris-text-action" id="lyris-reset-light-btn">Reset light settings</button>
         </div>
@@ -1860,6 +1958,18 @@
 
   function setupLyrisSettingsControls(panel) {
     // 1. Lyrics controls
+    const lyToggle = panel.querySelector('#lyris-opt-lyrics-enabled');
+    if (lyToggle) {
+      lyToggle.addEventListener('change', () => {
+        const val = lyToggle.checked;
+        settings.lyricsEnabled = val;
+        settings.appleMode = val;
+        saveSetting('lyricsEnabled', val);
+        saveSetting('appleMode', val);
+        applySettingsToDOM();
+      });
+    }
+
     const jMode = panel.querySelector('#lyris-opt-japanese-mode');
     if (jMode) {
       jMode.addEventListener('change', () => {
@@ -1900,7 +2010,11 @@
         settings.fontSize = val;
         document.documentElement.style.setProperty('--ly-font-size', `${val}px`);
         document.documentElement.style.setProperty('--am-font-size', `${val}px`);
-        saveSetting('fontSize', val);
+        saveSetting('fontSize', val, 250);
+      });
+      fontSizeInput.addEventListener('change', () => {
+        const val = parseInt(fontSizeInput.value, 10);
+        saveSetting('fontSize', val, 0);
       });
     }
 
@@ -1924,18 +2038,32 @@
     const resetLyricsBtn = panel.querySelector('#lyris-reset-lyrics-btn');
     if (resetLyricsBtn) {
       resetLyricsBtn.addEventListener('click', () => {
-        settings.japaneseMode = 'furigana';
-        settings.showOriginal = true;
-        settings.translationEnabled = false;
-        settings.fontSize = 40;
-        settings.wordHighlight = true;
-        settings.clickToSeek = true;
-        saveSetting('japaneseMode', 'furigana');
-        saveSetting('showOriginal', true);
-        saveSetting('translationEnabled', false);
-        saveSetting('fontSize', 40);
-        saveSetting('wordHighlight', true);
-        saveSetting('clickToSeek', true);
+        settings.lyricsEnabled = DEFAULT_SETTINGS.lyricsEnabled;
+        settings.appleMode = DEFAULT_SETTINGS.appleMode;
+        settings.japaneseMode = DEFAULT_SETTINGS.japaneseMode;
+        settings.showOriginal = DEFAULT_SETTINGS.showOriginal;
+        settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
+        settings.fontSize = DEFAULT_SETTINGS.fontSize;
+        settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
+        settings.clickToSeek = DEFAULT_SETTINGS.clickToSeek;
+
+        const toSave = {
+          lyricsEnabled: DEFAULT_SETTINGS.lyricsEnabled,
+          appleMode: DEFAULT_SETTINGS.appleMode,
+          japaneseMode: DEFAULT_SETTINGS.japaneseMode,
+          showOriginal: DEFAULT_SETTINGS.showOriginal,
+          translationEnabled: DEFAULT_SETTINGS.translationEnabled,
+          fontSize: DEFAULT_SETTINGS.fontSize,
+          wordHighlight: DEFAULT_SETTINGS.wordHighlight,
+          clickToSeek: DEFAULT_SETTINGS.clickToSeek
+        };
+        try {
+          chrome.storage.sync.set(toSave);
+        } catch (e) {
+          console.warn('[Lyris] Storage error:', e);
+        }
+
+        applySettingsToDOM();
         updateLyrisSettingsUI();
         renderCurrentLyricsState();
         showToast('Lyrics settings reset to defaults');
@@ -1946,9 +2074,13 @@
     const ambToggle = panel.querySelector('#lyris-opt-ambient-enabled');
     if (ambToggle) {
       ambToggle.addEventListener('change', () => {
-        settings.ambientLighting = ambToggle.checked;
-        saveSetting('ambientLighting', settings.ambientLighting);
-        ambientEngine.toggle(settings.ambientLighting);
+        const val = ambToggle.checked;
+        settings.ambientEnabled = val;
+        settings.ambientLighting = val;
+        saveSetting('ambientEnabled', val);
+        saveSetting('ambientLighting', val);
+        applySettingsToDOM();
+        ambientEngine.toggle(val);
       });
     }
 
@@ -1958,9 +2090,16 @@
       intInput.addEventListener('input', () => {
         const val = parseInt(intInput.value, 10);
         if (intVal) intVal.textContent = `${val}%`;
+        settings.ambientBrightness = val;
         settings.ambientIntensity = val;
         ambientEngine.updateBrightness(val);
-        saveSetting('ambientIntensity', val);
+        saveSetting('ambientBrightness', val, 250);
+        saveSetting('ambientIntensity', val, 250);
+      });
+      intInput.addEventListener('change', () => {
+        const val = parseInt(intInput.value, 10);
+        saveSetting('ambientBrightness', val, 0);
+        saveSetting('ambientIntensity', val, 0);
       });
     }
 
@@ -1968,11 +2107,15 @@
     const spreadVal = panel.querySelector('#lyris-spread-val');
     if (spreadInput) {
       spreadInput.addEventListener('input', () => {
-        const val = parseFloat(spreadInput.value);
-        if (spreadVal) spreadVal.textContent = `${val.toFixed(2)}x`;
+        const val = parseInt(spreadInput.value, 10);
+        if (spreadVal) spreadVal.textContent = `${val}%`;
         settings.ambientSpread = val;
         ambientEngine.updateSpread(val);
-        saveSetting('ambientSpread', val);
+        saveSetting('ambientSpread', val, 250);
+      });
+      spreadInput.addEventListener('change', () => {
+        const val = parseInt(spreadInput.value, 10);
+        saveSetting('ambientSpread', val, 0);
       });
     }
 
@@ -1984,7 +2127,11 @@
         if (blurVal) blurVal.textContent = `${val}px`;
         settings.ambientBlur = val;
         ambientEngine.updateBlur(val);
-        saveSetting('ambientBlur', val);
+        saveSetting('ambientBlur', val, 250);
+      });
+      blurInput.addEventListener('change', () => {
+        const val = parseInt(blurInput.value, 10);
+        saveSetting('ambientBlur', val, 0);
       });
     }
 
@@ -1996,7 +2143,11 @@
         if (satVal) satVal.textContent = `${val}%`;
         settings.ambientSaturation = val;
         ambientEngine.updateSaturation(val);
-        saveSetting('ambientSaturation', val);
+        saveSetting('ambientSaturation', val, 250);
+      });
+      satInput.addEventListener('change', () => {
+        const val = parseInt(satInput.value, 10);
+        saveSetting('ambientSaturation', val, 0);
       });
     }
 
@@ -2005,10 +2156,14 @@
     if (fadeInput) {
       fadeInput.addEventListener('input', () => {
         const val = parseFloat(fadeInput.value);
-        if (fadeVal) fadeVal.textContent = `${val.toFixed(2)}s`;
+        if (fadeVal) fadeVal.textContent = val === 0 ? 'Off' : `${val.toFixed(2)}s`;
         settings.ambientFadeDuration = val;
         ambientEngine.updateFadeDuration(val);
-        saveSetting('ambientFadeDuration', val);
+        saveSetting('ambientFadeDuration', val, 250);
+      });
+      fadeInput.addEventListener('change', () => {
+        const val = parseFloat(fadeInput.value);
+        saveSetting('ambientFadeDuration', val, 0);
       });
     }
 
@@ -2016,24 +2171,38 @@
     const resetLightBtn = panel.querySelector('#lyris-reset-light-btn');
     if (resetLightBtn) {
       resetLightBtn.addEventListener('click', () => {
-        settings.ambientLighting = true;
-        settings.ambientIntensity = 95;
-        settings.ambientSpread = 1.35;
-        settings.ambientBlur = 70;
-        settings.ambientSaturation = 120;
-        settings.ambientFadeDuration = 0.15;
-        saveSetting('ambientLighting', true);
-        saveSetting('ambientIntensity', 95);
-        saveSetting('ambientSpread', 1.35);
-        saveSetting('ambientBlur', 70);
-        saveSetting('ambientSaturation', 120);
-        saveSetting('ambientFadeDuration', 0.15);
-        ambientEngine.toggle(true);
-        ambientEngine.updateBrightness(95);
-        ambientEngine.updateSpread(1.35);
-        ambientEngine.updateBlur(70);
-        ambientEngine.updateSaturation(120);
-        ambientEngine.updateFadeDuration(0.15);
+        settings.ambientEnabled = DEFAULT_SETTINGS.ambientEnabled;
+        settings.ambientLighting = DEFAULT_SETTINGS.ambientLighting;
+        settings.ambientBrightness = DEFAULT_SETTINGS.ambientBrightness;
+        settings.ambientIntensity = DEFAULT_SETTINGS.ambientIntensity;
+        settings.ambientSpread = DEFAULT_SETTINGS.ambientSpread;
+        settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
+        settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
+        settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
+
+        const toSave = {
+          ambientEnabled: DEFAULT_SETTINGS.ambientEnabled,
+          ambientLighting: DEFAULT_SETTINGS.ambientLighting,
+          ambientBrightness: DEFAULT_SETTINGS.ambientBrightness,
+          ambientIntensity: DEFAULT_SETTINGS.ambientIntensity,
+          ambientSpread: DEFAULT_SETTINGS.ambientSpread,
+          ambientBlur: DEFAULT_SETTINGS.ambientBlur,
+          ambientSaturation: DEFAULT_SETTINGS.ambientSaturation,
+          ambientFadeDuration: DEFAULT_SETTINGS.ambientFadeDuration
+        };
+        try {
+          chrome.storage.sync.set(toSave);
+        } catch (e) {
+          console.warn('[Lyris] Storage error:', e);
+        }
+
+        applySettingsToDOM();
+        ambientEngine.toggle(DEFAULT_SETTINGS.ambientEnabled);
+        ambientEngine.updateBrightness(DEFAULT_SETTINGS.ambientBrightness);
+        ambientEngine.updateSpread(DEFAULT_SETTINGS.ambientSpread);
+        ambientEngine.updateBlur(DEFAULT_SETTINGS.ambientBlur);
+        ambientEngine.updateSaturation(DEFAULT_SETTINGS.ambientSaturation);
+        ambientEngine.updateFadeDuration(DEFAULT_SETTINGS.ambientFadeDuration);
         updateLyrisSettingsUI();
         showToast('Light settings reset to defaults');
       });
@@ -2060,6 +2229,9 @@
     const panel = document.getElementById('lyris-settings');
     if (!panel) return;
 
+    const lyEnabled = panel.querySelector('#lyris-opt-lyrics-enabled');
+    if (lyEnabled) lyEnabled.checked = (settings.lyricsEnabled ?? settings.appleMode) !== false;
+
     const jMode = panel.querySelector('#lyris-opt-japanese-mode');
     if (jMode) jMode.value = settings.japaneseMode || 'furigana';
 
@@ -2071,8 +2243,9 @@
 
     const fsInput = panel.querySelector('#lyris-opt-font-size');
     const fsVal = panel.querySelector('#lyris-font-size-val');
-    if (fsInput) fsInput.value = settings.fontSize || 40;
-    if (fsVal) fsVal.textContent = `${settings.fontSize || 40}px`;
+    const fontSize = settings.fontSize || 40;
+    if (fsInput) fsInput.value = fontSize;
+    if (fsVal) fsVal.textContent = `${fontSize}px`;
 
     const wk = panel.querySelector('#lyris-opt-word-karaoke');
     if (wk) wk.checked = settings.wordHighlight !== false;
@@ -2081,32 +2254,37 @@
     if (cs) cs.checked = settings.clickToSeek !== false;
 
     const amb = panel.querySelector('#lyris-opt-ambient-enabled');
-    if (amb) amb.checked = settings.ambientLighting !== false;
+    if (amb) amb.checked = (settings.ambientEnabled ?? settings.ambientLighting) !== false;
 
     const intInput = panel.querySelector('#lyris-opt-intensity');
     const intVal = panel.querySelector('#lyris-intensity-val');
-    if (intInput) intInput.value = settings.ambientIntensity ?? 95;
-    if (intVal) intVal.textContent = `${settings.ambientIntensity ?? 95}%`;
+    const intensity = settings.ambientBrightness ?? settings.ambientIntensity ?? 95;
+    if (intInput) intInput.value = intensity;
+    if (intVal) intVal.textContent = `${intensity}%`;
 
     const spreadInput = panel.querySelector('#lyris-opt-spread');
     const spreadVal = panel.querySelector('#lyris-spread-val');
-    if (spreadInput) spreadInput.value = settings.ambientSpread ?? 1.35;
-    if (spreadVal) spreadVal.textContent = `${(settings.ambientSpread ?? 1.35).toFixed(2)}x`;
+    const spread = settings.ambientSpread ?? 42;
+    if (spreadInput) spreadInput.value = spread;
+    if (spreadVal) spreadVal.textContent = `${spread}%`;
 
     const blurInput = panel.querySelector('#lyris-opt-blur');
     const blurVal = panel.querySelector('#lyris-blur-val');
-    if (blurInput) blurInput.value = settings.ambientBlur ?? 70;
-    if (blurVal) blurVal.textContent = `${settings.ambientBlur ?? 70}px`;
+    const blur = settings.ambientBlur ?? 70;
+    if (blurInput) blurInput.value = blur;
+    if (blurVal) blurVal.textContent = `${blur}px`;
 
     const satInput = panel.querySelector('#lyris-opt-saturation');
     const satVal = panel.querySelector('#lyris-sat-val');
-    if (satInput) satInput.value = settings.ambientSaturation ?? 120;
-    if (satVal) satVal.textContent = `${settings.ambientSaturation ?? 120}%`;
+    const sat = settings.ambientSaturation ?? 120;
+    if (satInput) satInput.value = sat;
+    if (satVal) satVal.textContent = `${sat}%`;
 
     const fadeInput = panel.querySelector('#lyris-opt-fade');
     const fadeVal = panel.querySelector('#lyris-fade-val');
-    if (fadeInput) fadeInput.value = settings.ambientFadeDuration ?? 0.15;
-    if (fadeVal) fadeVal.textContent = `${(settings.ambientFadeDuration ?? 0.15).toFixed(2)}s`;
+    const fade = settings.ambientFadeDuration ?? 0.15;
+    if (fadeInput) fadeInput.value = fade;
+    if (fadeVal) fadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
 
     renderSourcesListUI();
   }
@@ -2116,8 +2294,8 @@
     if (!container) return;
 
     container.innerHTML = '';
-    const order = settings.providerOrder || DEFAULT_SETTINGS.providerOrder;
-    const enabled = settings.enabledProviders || DEFAULT_SETTINGS.enabledProviders;
+    const order = [...(settings.providerOrder || DEFAULT_SETTINGS.providerOrder)];
+    const enabled = { ...(settings.enabledProviders || DEFAULT_SETTINGS.enabledProviders) };
 
     const names = {
       'lrclib': 'LRCLIB (Synced & Plain)',
@@ -2146,8 +2324,8 @@
 
       const chk = row.querySelector('input[type="checkbox"]');
       chk.addEventListener('change', () => {
-        if (!settings.enabledProviders) settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
-        settings.enabledProviders[providerId] = chk.checked;
+        enabled[providerId] = chk.checked;
+        settings.enabledProviders = { ...enabled };
         saveSetting('enabledProviders', settings.enabledProviders);
         lyricsCache.clear();
         safeSendMessage({ action: 'CLEAR_CACHE' });
@@ -2160,7 +2338,7 @@
           const temp = order[index];
           order[index] = order[index - 1];
           order[index - 1] = temp;
-          settings.providerOrder = order;
+          settings.providerOrder = [...order];
           saveSetting('providerOrder', settings.providerOrder);
           renderSourcesListUI();
           lyricsCache.clear();
@@ -2175,7 +2353,7 @@
           const temp = order[index];
           order[index] = order[index + 1];
           order[index + 1] = temp;
-          settings.providerOrder = order;
+          settings.providerOrder = [...order];
           saveSetting('providerOrder', settings.providerOrder);
           renderSourcesListUI();
           lyricsCache.clear();
@@ -2440,34 +2618,34 @@
         lineElem.appendChild(transElem);
       }
 
-      if (settings.clickToSeek !== false) {
-        lineElem.title = 'Click to seek • Alt+Click to calibrate audio sync';
-        lineElem.addEventListener('click', (e) => {
-          const video = document.querySelector('video');
-          if (!video) return;
+      lineElem.title = 'Click to seek • Alt+Click to calibrate audio sync';
+      lineElem.addEventListener('click', (e) => {
+        const video = document.querySelector('video');
+        if (!video) return;
 
-          // Quick Calibration: Alt+Click or Shift+Click aligns lyric line to current playback
-          if (e.altKey || e.shiftKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            const newOffset = Math.round((line.time - video.currentTime) * 1000);
-            setTrackOffset(newOffset);
-            const sign = newOffset > 0 ? '+' : '';
-            showToast(`🎯 Calibrated to audio playback: ${sign}${(newOffset / 1000).toFixed(1)}s`);
-            return;
-          }
+        // Quick Calibration: Alt+Click or Shift+Click aligns lyric line to current playback
+        if (e.altKey || e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          const newOffset = Math.round((line.time - video.currentTime) * 1000);
+          setTrackOffset(newOffset);
+          const sign = newOffset > 0 ? '+' : '';
+          showToast(`🎯 Calibrated to audio playback: ${sign}${(newOffset / 1000).toFixed(1)}s`);
+          return;
+        }
 
-          const eff = getEffectiveOffset();
-          video.currentTime = Math.max(0, line.time - (eff / 1000));
-          userScrolled = false;
-          const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
-          if (resumeBtn) {
-            resumeBtn.hidden = true;
-            resumeBtn.classList.remove('visible');
-          }
-          setActiveLine(index, true);
-        });
-      }
+        if (settings.clickToSeek === false) return;
+
+        const eff = getEffectiveOffset();
+        video.currentTime = Math.max(0, line.time - (eff / 1000));
+        userScrolled = false;
+        const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+        if (resumeBtn) {
+          resumeBtn.hidden = true;
+          resumeBtn.classList.remove('visible');
+        }
+        setActiveLine(index, true);
+      });
 
       fragment.appendChild(lineElem);
     });

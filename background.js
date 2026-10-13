@@ -47,12 +47,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Clear cached lyrics when settings change in storage
+// Clear cached lyrics when provider settings change in storage
 if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
-      lyricsCache.clear();
-      translationCache.clear();
+      if (changes.providerOrder || changes.enabledProviders) {
+        lyricsCache.clear();
+      }
+      if (changes.translationEnabled) {
+        translationCache.clear();
+      }
     }
   });
 }
