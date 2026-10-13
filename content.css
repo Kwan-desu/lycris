@@ -236,6 +236,9 @@ ytmusic-player-page ytmusic-message-renderer {
 }
 
 /* Hide native description shelf content when Lyris lyrics are mounted */
+#side-panel:has(#lyris-lyrics-wrapper:not([hidden])) ytmusic-description-shelf-renderer:not(.am-original-view),
+#side-panel:has(#lyris-lyrics-wrapper:not([hidden])) ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"]:not(.am-original-view),
+#side-panel:has(#lyris-lyrics-wrapper:not([hidden])) ytmusic-tab-renderer[tab-id="FEmusic_lyrics"]:not(.am-original-view),
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) #description,
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) .description,
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) #footer,

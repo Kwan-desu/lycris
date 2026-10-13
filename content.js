@@ -480,23 +480,26 @@
   }
 
   function convertJapaneseLine(text, mode) {
+    if (typeof text === 'object' && text !== null) {
+      text = text.text || '';
+    }
     if (!text || mode === 'original' || !containsJapanese(text)) {
-      return { text: text, isRuby: false };
+      return escapeHTML(text || '');
     }
     if (mode === 'furigana') {
-      return { text: addFurigana(text), isRuby: true };
+      return addFurigana(text);
     }
     const hira = textToHiragana(text);
     if (mode === 'hiragana') {
-      return { text: hira, isRuby: false };
+      return escapeHTML(hira);
     }
     if (mode === 'katakana') {
-      return { text: hiraganaToKatakana(hira), isRuby: false };
+      return escapeHTML(hiraganaToKatakana(hira));
     }
     if (mode === 'romaji') {
-      return { text: kanaToRomaji(hira), isRuby: false };
+      return escapeHTML(kanaToRomaji(hira));
     }
-    return { text: text, isRuby: false };
+    return escapeHTML(text);
   }
 
   let isTranslatingLyrics = false;
@@ -1147,8 +1150,8 @@
       'ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer, ' +
       'ytmusic-tab-renderer[tab-id="FEmusic_lyrics"] ytmusic-message-renderer, ' +
       'ytmusic-tab-renderer.am-lyrics-tab-active ytmusic-message-renderer, ' +
-      '#side-panel ytmusic-message-renderer, ' +
-      'ytmusic-message-renderer'
+      '#side-panel ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer, ' +
+      '#side-panel ytmusic-message-renderer'
     );
     messages.forEach(m => {
       m.style.setProperty('display', 'none', 'important');
@@ -1273,7 +1276,7 @@
       lyricsTab.addEventListener('click', () => {
         setTimeout(() => {
           activateLyricsTab();
-        }, 30);
+        }, 10);
       }, true);
     }
 
@@ -1283,7 +1286,11 @@
       if (tab !== lyricsTab && !tab._amOtherTabClickBound) {
         tab._amOtherTabClickBound = true;
         tab.addEventListener('click', () => {
-          deactivateCustomLyricsTab();
+          setTimeout(() => {
+            if (!isLyricsTabSelected()) {
+              deactivateCustomLyricsTab();
+            }
+          }, 10);
         });
       }
     });
@@ -1294,16 +1301,28 @@
     const wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
     if (!side || !wrapper) return;
 
-    const sideRect = side.getBoundingClientRect();
-    const tabs = side.querySelector('tp-yt-paper-tabs') || document.querySelector('tp-yt-paper-tabs');
+    // Reset side panel scroll so it never creates phantom offsets
+    side.scrollTop = 0;
+
+    const header = side.querySelector('ytmusic-tab-header-shelf-renderer') ||
+                   side.querySelector('tp-yt-paper-tabs') ||
+                   document.querySelector('tp-yt-paper-tabs');
     let top = 48;
-    if (tabs) {
-      const tabRect = tabs.getBoundingClientRect();
-      if (tabRect.width && tabRect.height) {
-        top = Math.max(0, tabRect.bottom - sideRect.top);
+    if (header) {
+      const headerRect = header.getBoundingClientRect();
+      const sideRect = side.getBoundingClientRect();
+      if (headerRect.height > 0) {
+        const diff = headerRect.bottom - sideRect.top;
+        if (diff >= 36 && diff <= 68) {
+          top = diff;
+        } else if (headerRect.height >= 36 && headerRect.height <= 68) {
+          top = headerRect.height;
+        }
       }
     }
-    wrapper.style.top = `${Math.round(top)}px`;
+    const safeTop = Math.min(64, Math.max(40, Math.round(top)));
+    wrapper.style.top = `${safeTop}px`;
+    wrapper.style.height = `calc(100% - ${safeTop}px)`;
   }
 
   function concealNativeSiblings(conceal) {
@@ -1372,14 +1391,6 @@
       }
       lyricsTab.classList.add('iron-selected');
       lyricsTab.setAttribute('aria-selected', 'true');
-
-      const allTabs = getAllSidePanelTabs();
-      allTabs.forEach(t => {
-        if (t !== lyricsTab) {
-          t.classList.remove('iron-selected');
-          t.setAttribute('aria-selected', 'false');
-        }
-      });
     }
 
     const list = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
@@ -1396,12 +1407,6 @@
     }
 
     concealNativeSiblings(false);
-
-    const lyricsTab = getNativeLyricsTab();
-    if (lyricsTab) {
-      lyricsTab.classList.remove('iron-selected');
-      lyricsTab.setAttribute('aria-selected', 'false');
-    }
   }
 
   function handleTabSwitch() {
@@ -2407,12 +2412,14 @@
             const span = document.createElement('span');
             span.className = 'lyris-word am-word';
             span.dataset.wordIdx = wIdx;
-            span.innerHTML = convertJapaneseLine(w.text, mode);
+            const converted = convertJapaneseLine(w.text, mode);
+            span.innerHTML = (converted && typeof converted === 'object' && 'text' in converted) ? converted.text : (converted || '');
             primaryContainer.appendChild(span);
           }
         });
       } else {
-        primaryContainer.innerHTML = convertJapaneseLine(line.text || '♪', mode);
+        const converted = convertJapaneseLine(line.text || '♪', mode);
+        primaryContainer.innerHTML = (converted && typeof converted === 'object' && 'text' in converted) ? converted.text : (converted || '');
       }
 
       lineElem.appendChild(primaryContainer);
@@ -2557,7 +2564,8 @@
 
       const primary = document.createElement('div');
       primary.className = 'lyris-line-primary am-line-primary';
-      primary.innerHTML = convertJapaneseLine(trimmed || '', mode);
+      const converted = convertJapaneseLine(trimmed || '', mode);
+      primary.innerHTML = (converted && typeof converted === 'object' && 'text' in converted) ? converted.text : (converted || '');
       lineElem.appendChild(primary);
 
       if (settings.showOriginal !== false && mode !== 'original' && containsJapanese(trimmed)) {
@@ -3052,14 +3060,24 @@
       const tabs = Array.from(parentTabs.querySelectorAll('tp-yt-paper-tab'));
       const lyricsIndex = tabs.indexOf(nativeLyricsTab);
 
-      // If any other tab is explicitly selected, lyrics is NOT selected
+      // 1. Primary check: Polymer parentTabs.selected index
+      if (lyricsIndex !== -1 && parentTabs.selected !== undefined && parentTabs.selected !== null) {
+        const selIdx = parseInt(parentTabs.selected, 10);
+        if (!isNaN(selIdx)) {
+          return selIdx === lyricsIndex;
+        }
+      }
+
+      // 2. Secondary check: iron-selected on lyrics tab
+      if (nativeLyricsTab.classList.contains('iron-selected') ||
+          nativeLyricsTab.getAttribute('aria-selected') === 'true') {
+        return true;
+      }
+
+      // 3. Fallback: check if another tab is explicitly selected
       const otherSelected = tabs.some(t => t !== nativeLyricsTab && (t.classList.contains('iron-selected') || t.getAttribute('aria-selected') === 'true'));
       if (otherSelected) {
         return false;
-      }
-
-      if (lyricsIndex !== -1 && (parentTabs.selected === lyricsIndex || parentTabs.selected === String(lyricsIndex))) {
-        return true;
       }
     }
 
