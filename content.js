@@ -271,19 +271,22 @@
     const root = document.documentElement;
     // Map blur percentage (0-100%) to px (0-120px)
     const blurPx = Math.round((settings.ambientBlur / 100) * 120);
-    // Map spread percentage (0-300%) to scale (1.0 to 2.5)
+    // Map spread percentage (0-300%) to decimal ratio (0.0 to 3.0)
+    const spreadRatio = (settings.ambientSpread / 100).toFixed(2);
+    // Backward compatibility scale (1.0 to 2.5)
     const spreadScale = (1.0 + (settings.ambientSpread / 100) * 0.5).toFixed(3);
 
     root.style.setProperty('--am-font-size', `${settings.fontSize}px`);
     root.style.setProperty('--am-blur', `${blurPx}px`);
-    root.style.setProperty('--am-spread', spreadScale);
+    root.style.setProperty('--am-spread', spreadRatio);
+    root.style.setProperty('--am-spread-scale', spreadScale);
     root.style.setProperty('--am-brightness', `${settings.ambientBrightness}%`);
     root.style.setProperty('--am-saturation', `${settings.ambientSaturation}%`);
     root.style.setProperty('--am-fade-duration', settings.ambientFadeDuration > 0 ? `${settings.ambientFadeDuration}s` : '0s');
 
     const playerAmbient = document.getElementById('am-player-ambient-wrapper');
     if (playerAmbient) {
-      playerAmbient.style.display = settings.ambientEnabled ? 'flex' : 'none';
+      playerAmbient.style.display = settings.ambientEnabled ? 'block' : 'none';
     }
 
     const pageAmbient = document.getElementById('am-page-ambient-backdrop');
@@ -309,6 +312,10 @@
     const wrapper = document.getElementById('am-lyrics-wrapper');
     if (wrapper) {
       wrapper.dataset.highlightStyle = settings.highlightStyle || 'apple-glow';
+    }
+
+    if (typeof ambientEngine !== 'undefined' && ambientEngine) {
+      ambientEngine.drawFrame(true);
     }
   }
 
@@ -487,8 +494,8 @@
         for (let i = 1; i <= 3; i++) {
           const cvs = document.createElement('canvas');
           cvs.className = `am-projector-layer-${i}`;
-          cvs.width = 320;
-          cvs.height = 180;
+          cvs.width = 480;
+          cvs.height = 270;
           const ctx = cvs.getContext('2d', { alpha: false, willReadFrequently: false });
           wrapper.appendChild(cvs);
           this.layers.push({ cvs, ctx });
@@ -566,6 +573,103 @@
       requestAnimationFrame(loop);
     }
 
+    renderEdgeSpread(sourceCanvas, ctx, targetW, targetH, spreadVal, blurVal) {
+      if (!sourceCanvas || !ctx || targetW <= 0 || targetH <= 0) return;
+
+      const sw = sourceCanvas.width;
+      const sh = sourceCanvas.height;
+      if (sw === 0 || sh === 0) return;
+
+      ctx.clearRect(0, 0, targetW, targetH);
+
+      // Check if side panel (lyrics / up next) is active to adapt rightward spread
+      const sidePanel = document.querySelector('ytmusic-player-page #side-panel') || document.querySelector('#side-panel');
+      const hasSidePanel = !!(sidePanel && sidePanel.offsetParent !== null && sidePanel.clientWidth > 50);
+
+      const spreadRatio = (spreadVal || 42) / 100.0;
+
+      // Mathematical anchor coordinates matching DOM layout
+      let vx, vy, vw, vh;
+      if (hasSidePanel) {
+        // Video/Art on center-left, extended rightward spread for lyrics (matches user drawing Untitled.png)
+        const denom = 1.30 + spreadRatio * 0.75;
+        vx = Math.round(targetW * (0.15 / denom));
+        vw = Math.round(targetW * (1.00 / denom));
+        vy = Math.round(targetH * (0.15 / 1.30));
+        vh = Math.round(targetH * (1.00 / 1.30));
+      } else {
+        // Symmetrical layout when side panel is absent
+        const denom = 1.30 + spreadRatio * 0.30;
+        vx = Math.round(targetW * (0.15 / denom));
+        vw = Math.round(targetW * (1.00 / denom));
+        vy = Math.round(targetH * (0.15 / 1.30));
+        vh = Math.round(targetH * (1.00 / 1.30));
+      }
+
+      // Sample edge depths (5% of source frame)
+      const dx = Math.max(3, Math.round(sw * 0.05));
+      const dy = Math.max(3, Math.round(sh * 0.05));
+
+      // Calculate number of bands based on ambientSpread
+      const numBands = Math.max(3, Math.min(16, Math.round((spreadVal || 42) / 15) + 1));
+
+      // Draw concentric bands from outer to inner
+      for (let k = numBands; k >= 1; k--) {
+        const t = k / numBands;
+        const prevT = (k - 1) / numBands;
+
+        const bx1 = Math.round(vx - vx * t);
+        const by1 = Math.round(vy - vy * t);
+        const bx2 = Math.round((vx + vw) + (targetW - (vx + vw)) * t);
+        const by2 = Math.round((vy + vh) + (targetH - (vy + vh)) * t);
+
+        const p_bx1 = Math.round(vx - vx * prevT);
+        const p_by1 = Math.round(vy - vy * prevT);
+        const p_bx2 = Math.round((vx + vw) + (targetW - (vx + vw)) * prevT);
+        const p_by2 = Math.round((vy + vh) + (targetH - (vy + vh)) * prevT);
+
+        const w_left = Math.max(1, p_bx1 - bx1);
+        const h_left = Math.max(1, by2 - by1);
+
+        const w_right = Math.max(1, bx2 - p_bx2);
+        const h_right = Math.max(1, by2 - by1);
+
+        const w_top = Math.max(1, bx2 - bx1);
+        const h_top = Math.max(1, p_by1 - by1);
+
+        const w_bot = Math.max(1, bx2 - bx1);
+        const h_bot = Math.max(1, by2 - p_by2);
+
+        // 1. Left edge strip (sampled from x=0..dx, y=0..sh)
+        ctx.drawImage(sourceCanvas, 0, 0, dx, sh, bx1, by1, w_left, h_left);
+
+        // 2. Right edge strip (sampled from x=sw-dx..sw, y=0..sh) -> spreads to the right
+        ctx.drawImage(sourceCanvas, sw - dx, 0, dx, sh, p_bx2, by1, w_right, h_right);
+
+        // 3. Top edge strip (sampled from x=0..sw, y=0..dy)
+        ctx.drawImage(sourceCanvas, 0, 0, sw, dy, bx1, by1, w_top, h_top);
+
+        // 4. Bottom edge strip (sampled from x=0..sw, y=sh-dy..sh)
+        ctx.drawImage(sourceCanvas, 0, sh - dy, sw, dy, bx1, p_by2, w_bot, h_bot);
+
+        // 5. Four corners (blend edge corners seamlessly)
+        ctx.drawImage(sourceCanvas, 0, 0, dx, dy, bx1, by1, w_left, h_top);
+        ctx.drawImage(sourceCanvas, sw - dx, 0, dx, dy, p_bx2, by1, w_right, h_top);
+        ctx.drawImage(sourceCanvas, 0, sh - dy, dx, dy, bx1, p_by2, w_left, h_bot);
+        ctx.drawImage(sourceCanvas, sw - dx, sh - dy, dx, dy, p_bx2, p_by2, w_right, h_bot);
+
+        // When blur is 0% (as shown in reference screenshot and user drawing), render subtle band boundary
+        if ((blurVal || 0) === 0) {
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(bx1, by1, bx2 - bx1, by2 - by1);
+        }
+      }
+
+      // Draw original video / album art in center
+      ctx.drawImage(sourceCanvas, 0, 0, sw, sh, vx, vy, vw, vh);
+    }
+
     drawFrame(force = false) {
       // 1. Skip drawing if player is minimized to miniplayer
       const playerPage = document.querySelector('ytmusic-player-page#player-page') || document.querySelector('ytmusic-player-page');
@@ -578,7 +682,7 @@
       }
 
       if (wrapper && settings.ambientEnabled) {
-        wrapper.style.display = 'flex';
+        wrapper.style.display = 'block';
       }
 
       // 2. Self-healing: ensure ambient wrapper is connected to live DOM
@@ -589,9 +693,9 @@
       const source = this.getEffectiveSource();
       if (!source) return;
 
-      // Static Artwork optimization: do not redraw 30fps if static image hasn't changed
+      // Static Artwork optimization: do not redraw 30fps if static image and spread/blur haven't changed
       if (!force && source.type === 'image') {
-        const key = source.element.src || source.element.currentSrc;
+        const key = `${source.element.src || source.element.currentSrc}_${settings.ambientSpread}_${settings.ambientBlur}`;
         if (key && key === this.lastDrawnKey) {
           return;
         }
@@ -624,7 +728,7 @@
           if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
             this.bufferCtx.drawImage(img, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             drawn = true;
-            this.lastDrawnKey = img.src || img.currentSrc || '';
+            this.lastDrawnKey = `${img.src || img.currentSrc || ''}_${settings.ambientSpread}_${settings.ambientBlur}`;
           }
         }
       } catch (e) {
@@ -633,7 +737,7 @@
           try {
             this.bufferCtx.drawImage(this.artworkImg, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
             drawn = true;
-            this.lastDrawnKey = this.artworkImg.src || '';
+            this.lastDrawnKey = `${this.artworkImg.src || ''}_${settings.ambientSpread}_${settings.ambientBlur}`;
           } catch (err) {}
         }
         // Fallback: try video if valid
@@ -651,10 +755,17 @@
 
       if (!drawn) return;
 
-      // Project onto all 3 graduated layers
+      // Project onto all 3 graduated layers using perimeter edge-spread projection
       for (const layer of this.layers) {
         if (layer.cvs && layer.cvs.isConnected) {
-          layer.ctx.drawImage(this.bufferCanvas, 0, 0, layer.cvs.width, layer.cvs.height);
+          this.renderEdgeSpread(
+            this.bufferCanvas,
+            layer.ctx,
+            layer.cvs.width,
+            layer.cvs.height,
+            settings.ambientSpread,
+            settings.ambientBlur
+          );
         }
       }
     }
