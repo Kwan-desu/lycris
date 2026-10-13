@@ -207,6 +207,14 @@ tp-yt-paper-tab[tab-id="FEmusic_lyrics"] .tab-content {
   display: none !important;
 }
 
+/* Side panel positioning anchor */
+ytmusic-player-page #side-panel,
+#side-panel {
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.lyris-native-hidden,
 .am-native-tab-hidden {
   display: none !important;
 }
@@ -227,22 +235,7 @@ ytmusic-player-page ytmusic-message-renderer {
   pointer-events: none !important;
 }
 
-/* Constrain side panel parents */
-ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"],
-ytmusic-tab-renderer[tab-id="FEmusic_lyrics"],
-#am-custom-lyrics-tab-renderer,
-ytmusic-section-list-renderer:has(#lyris-lyrics-wrapper),
-#contents.ytmusic-section-list-renderer:has(#lyris-lyrics-wrapper),
-ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) {
-  height: 100% !important;
-  max-height: 100% !important;
-  min-height: 0 !important;
-  flex: 1 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-}
-
+/* Hide native description shelf content when Lyris lyrics are mounted */
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) #description,
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) .description,
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper) #footer,
@@ -266,12 +259,15 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
 
 #lyris-lyrics-wrapper,
 #am-lyrics-wrapper {
-  position: relative !important;
+  position: absolute !important;
+  top: 48px;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   width: 100% !important;
-  height: 100% !important;
+  height: auto !important;
   min-height: 0 !important;
-  max-height: 100% !important;
-  flex: 1 !important;
+  max-height: none !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
@@ -280,6 +276,12 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   color: var(--ly-text) !important;
   background: transparent !important;
   isolation: isolate;
+  z-index: 10 !important;
+}
+
+#lyris-lyrics-wrapper[hidden],
+#am-lyrics-wrapper[hidden] {
+  display: none !important;
 }
 
 .lyris-scroll,
