@@ -197,6 +197,7 @@ tp-yt-paper-tab[tab-id="FEmusic_lyrics"] .tab-content {
 #am-custom-lyrics-tab-renderer {
   width: 100% !important;
   height: 100% !important;
+  min-height: 0 !important;
   max-height: 100% !important;
   flex: 1 !important;
   display: flex !important;

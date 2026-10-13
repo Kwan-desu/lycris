@@ -1101,14 +1101,19 @@
   function getNativeLyricsTab() {
     return document.querySelector('tp-yt-paper-tab[tab-id="FEmusic_lyrics"]') ||
            Array.from(document.querySelectorAll('tp-yt-paper-tab')).find(t => {
+             const tabId = (t.getAttribute('tab-id') || '').toLowerCase();
+             if (tabId.includes('lyrics')) return true;
+             const aria = (t.getAttribute('aria-label') || '').toLowerCase();
+             if (aria.includes('lyrics') || aria.includes('歌詞')) return true;
              const txt = (t.textContent || '').trim().toLowerCase();
-             return txt === 'lyrics' || txt === '歌詞';
+             return txt === 'lyrics' || txt === '歌詞' || txt === 'letra' || txt === 'paroles' || txt === 'songtext';
            });
   }
 
   function getAllSidePanelTabs() {
     const parentTabs = document.querySelector('ytmusic-player-page #side-panel tp-yt-paper-tabs') ||
                        document.querySelector('ytmusic-player-page tp-yt-paper-tabs') ||
+                       document.querySelector('#side-panel tp-yt-paper-tabs') ||
                        document.querySelector('tp-yt-paper-tabs');
     if (parentTabs) {
       return Array.from(parentTabs.querySelectorAll('tp-yt-paper-tab'));
@@ -1125,13 +1130,30 @@
     lyricsTab.setAttribute('aria-disabled', 'false');
     lyricsTab.classList.remove('disabled');
 
+    // Attach listener to parent tp-yt-paper-tabs container for global tab-switching handling
+    const parentTabs = lyricsTab.closest('tp-yt-paper-tabs') ||
+                       document.querySelector('ytmusic-player-page #side-panel tp-yt-paper-tabs') ||
+                       document.querySelector('#side-panel tp-yt-paper-tabs') ||
+                       document.querySelector('tp-yt-paper-tabs');
+    if (parentTabs && !parentTabs._amTabsBound) {
+      parentTabs._amTabsBound = true;
+      const onTabChange = () => {
+        setTimeout(() => {
+          handleTabSwitch();
+        }, 30);
+      };
+      parentTabs.addEventListener('click', onTabChange);
+      parentTabs.addEventListener('iron-select', onTabChange);
+      parentTabs.addEventListener('selected-changed', onTabChange);
+    }
+
     // Intercept click on the native lyrics tab
     if (!lyricsTab._amLyricsClickBound) {
       lyricsTab._amLyricsClickBound = true;
       lyricsTab.addEventListener('click', () => {
         setTimeout(() => {
           activateLyricsTab();
-        }, 50);
+        }, 30);
       }, true);
     }
 
@@ -1145,6 +1167,18 @@
         });
       }
     });
+  }
+
+  function handleTabSwitch() {
+    if (isLyricsTabSelected()) {
+      activateLyricsTab();
+      const list = document.getElementById('am-lyrics-list');
+      if (!list || !list.children.length) {
+        renderCurrentLyricsState();
+      }
+    } else {
+      deactivateCustomLyricsTab();
+    }
   }
 
   function activateLyricsTab() {
@@ -1163,19 +1197,21 @@
       lyricsTab.setAttribute('aria-selected', 'true');
     }
 
-    const nativeTabRenderer = getNativeLyricsTabRenderer();
     const nativeShelf = getNativeLyricsShelf();
-    const hasNativeContainer = nativeShelf || (nativeTabRenderer && !nativeTabRenderer.hidden && nativeTabRenderer.style.display !== 'none');
-
-    // If native container exists in DOM and is active
-    if (hasNativeContainer) {
+    // ONLY use native container if the description shelf actually exists in DOM!
+    // When YouTube has no native lyrics, nativeTabRenderer has no shelf. In that case,
+    // we MUST mount inside am-custom-lyrics-tab-renderer in #side-panel.
+    if (nativeShelf) {
       deactivateCustomLyricsTabOnly();
       injectLyricsWrapper();
       renderCurrentLyricsState();
       return;
     }
 
-    // Otherwise, native lyrics are absent: render inside our custom lyrics container inside #side-panel
+    activateCustomLyricsTab();
+  }
+
+  function activateCustomLyricsTab() {
     isCustomLyricsTabActive = true;
     const sidePanel = document.querySelector('ytmusic-player-page #side-panel') ||
                       document.querySelector('#side-panel');
@@ -1189,6 +1225,7 @@
       sidePanel.appendChild(customRenderer);
     }
     customRenderer.classList.remove('am-hidden');
+    customRenderer.style.removeProperty('display');
 
     // Hide queue, related, comments or other tab content in sidePanel
     Array.from(sidePanel.children).forEach(child => {
@@ -1205,8 +1242,13 @@
       wrapper = createLyricsDOM();
       customRenderer.appendChild(wrapper);
     }
+    wrapper.classList.remove('am-hidden');
+    wrapper.style.removeProperty('display');
 
-    renderCurrentLyricsState();
+    const list = document.getElementById('am-lyrics-list');
+    if (!list || !list.children.length) {
+      renderCurrentLyricsState();
+    }
     scrollToActiveLine(true);
   }
 
@@ -1250,7 +1292,6 @@
   function injectLyricsWrapper() {
     hideNativeLyricsUnavailableMessage();
     const shelf = getNativeLyricsShelf();
-    const tabRenderer = getNativeLyricsTabRenderer();
 
     if (shelf) {
       let wrapper = document.getElementById('am-lyrics-wrapper');
@@ -1259,36 +1300,15 @@
         wrapper = createLyricsDOM();
         shelf.insertBefore(wrapper, shelf.firstChild);
       }
-      shelf.classList.remove('am-original-view');
+      const isCustomActive = (settings.lyricsEnabled !== false) && (settings.appleMode !== false);
+      if (isCustomActive) {
+        shelf.classList.remove('am-original-view');
+      }
+      wrapper.classList.remove('am-hidden');
+      wrapper.style.removeProperty('display');
       return true;
-    } else if (tabRenderer && !tabRenderer.hidden && tabRenderer.style.display !== 'none') {
-      tabRenderer.classList.add('am-lyrics-tab-active');
-      let wrapper = document.getElementById('am-lyrics-wrapper');
-      if (!wrapper || !wrapper.isConnected || !tabRenderer.contains(wrapper)) {
-        if (wrapper) wrapper.remove();
-        wrapper = createLyricsDOM();
-        tabRenderer.insertBefore(wrapper, tabRenderer.firstChild);
-      }
-      return true;
-    } else if (isCustomLyricsTabActive) {
-      const sidePanel = document.querySelector('ytmusic-player-page #side-panel') ||
-                        document.querySelector('#side-panel');
-      if (!sidePanel) return false;
-      let customRenderer = document.getElementById('am-custom-lyrics-tab-renderer');
-      if (!customRenderer || !customRenderer.isConnected || !sidePanel.contains(customRenderer)) {
-        if (customRenderer) customRenderer.remove();
-        customRenderer = document.createElement('div');
-        customRenderer.id = 'am-custom-lyrics-tab-renderer';
-        sidePanel.appendChild(customRenderer);
-      }
-      customRenderer.classList.remove('am-hidden');
-
-      let wrapper = document.getElementById('am-lyrics-wrapper');
-      if (!wrapper || !wrapper.isConnected || !customRenderer.contains(wrapper)) {
-        if (wrapper) wrapper.remove();
-        wrapper = createLyricsDOM();
-        customRenderer.appendChild(wrapper);
-      }
+    } else if (isLyricsTabSelected() || isCustomLyricsTabActive) {
+      activateCustomLyricsTab();
       return true;
     }
     return false;
@@ -3059,8 +3079,38 @@
   function isLyricsTabSelected() {
     const nativeLyricsTab = getNativeLyricsTab();
     if (!nativeLyricsTab) return false;
-    return nativeLyricsTab.classList.contains('iron-selected') ||
-           nativeLyricsTab.getAttribute('aria-selected') === 'true';
+
+    // 1. Check direct class or aria attribute on the lyrics tab
+    if (nativeLyricsTab.classList.contains('iron-selected') ||
+        nativeLyricsTab.getAttribute('aria-selected') === 'true') {
+      return true;
+    }
+
+    // 2. Check parent tp-yt-paper-tabs selected property or index
+    const parentTabs = nativeLyricsTab.closest('tp-yt-paper-tabs') ||
+                       document.querySelector('ytmusic-player-page #side-panel tp-yt-paper-tabs') ||
+                       document.querySelector('#side-panel tp-yt-paper-tabs') ||
+                       document.querySelector('tp-yt-paper-tabs');
+    if (parentTabs) {
+      const tabs = Array.from(parentTabs.querySelectorAll('tp-yt-paper-tab'));
+      const lyricsIndex = tabs.indexOf(nativeLyricsTab);
+      if (lyricsIndex !== -1 && (parentTabs.selected === lyricsIndex || parentTabs.selected === String(lyricsIndex))) {
+        return true;
+      }
+      // If any other tab is explicitly selected, lyrics is not selected
+      const otherSelected = tabs.some(t => t !== nativeLyricsTab && (t.classList.contains('iron-selected') || t.getAttribute('aria-selected') === 'true'));
+      if (otherSelected) {
+        return false;
+      }
+    }
+
+    // 3. If native lyrics shelf is visible in DOM
+    const shelf = getNativeLyricsShelf();
+    if (shelf && shelf.offsetParent !== null) {
+      return true;
+    }
+
+    return false;
   }
 
   function setupWatchers() {
@@ -3103,27 +3153,23 @@
 
       // Check if user has the Lyrics tab active in the side panel
       const isSelected = isLyricsTabSelected();
-      if (isSelected && !isCustomLyricsTabActive) {
+      if (isSelected) {
         const shelf = getNativeLyricsShelf();
-        const tabRenderer = getNativeLyricsTabRenderer();
-        if (!shelf && (!tabRenderer || tabRenderer.hidden || tabRenderer.style.display === 'none')) {
-          activateLyricsTab();
-        }
-      } else if (!isSelected && isCustomLyricsTabActive) {
-        // User switched to UP NEXT, COMMENTS, or RELATED
-        deactivateCustomLyricsTab();
-      }
-
-      // Self-heal: If player is open and lyrics tab is active, ensure DOM is connected and rendering
-      if (isPlayerOpen && (isSelected || isCustomLyricsTabActive)) {
         const wrapper = document.getElementById('am-lyrics-wrapper');
         const customRenderer = document.getElementById('am-custom-lyrics-tab-renderer');
-        if (!wrapper || !wrapper.isConnected || (isCustomLyricsTabActive && (!customRenderer || !customRenderer.isConnected))) {
-          activateLyricsTab();
-          injectLyricsWrapper();
-          renderCurrentLyricsState();
-        }
-        if (isCustomLyricsTabActive) {
+        const list = document.getElementById('am-lyrics-list');
+
+        if (shelf) {
+          if (!wrapper || !wrapper.isConnected || !shelf.contains(wrapper)) {
+            injectLyricsWrapper();
+            renderCurrentLyricsState();
+          }
+        } else {
+          // No native shelf: must use custom lyrics tab renderer
+          if (!isCustomLyricsTabActive || !customRenderer || !customRenderer.isConnected || customRenderer.classList.contains('am-hidden') || !wrapper || !wrapper.isConnected || !customRenderer.contains(wrapper)) {
+            activateLyricsTab();
+          }
+          // Ensure other tabs in side panel remain hidden
           const sidePanel = document.querySelector('ytmusic-player-page #side-panel') || document.querySelector('#side-panel');
           if (sidePanel) {
             Array.from(sidePanel.children).forEach(child => {
@@ -3136,6 +3182,14 @@
             });
           }
         }
+
+        // Always self-heal empty lyrics content
+        if (!list || !list.children.length) {
+          renderCurrentLyricsState();
+        }
+      } else if (!isSelected && isCustomLyricsTabActive) {
+        // User switched to UP NEXT, COMMENTS, or RELATED
+        deactivateCustomLyricsTab();
       }
 
       const track = getCurrentTrackInfo();
