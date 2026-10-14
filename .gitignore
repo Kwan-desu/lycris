@@ -5,3 +5,8 @@ Thumbs.db
 scratch_*
 tmp/
 *.tmp
+
+# Build output
+dist/
+node_modules/
+docs/brand-out/

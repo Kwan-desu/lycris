@@ -85,8 +85,8 @@ ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-descripti
 ytmusic-tab-renderer[tab-id="FEmusic_lyrics"] ytmusic-description-shelf-renderer,
 ytmusic-description-shelf-renderer:has(#lyris-lyrics-wrapper),
 #lyris-lyrics-wrapper,
-#lyris-lyrics-scroll-container,
-#lyris-lyrics-list {
+#lyris-scroll,
+#lyris-list {
   background: transparent !important;
   background-color: transparent !important;
 }
@@ -114,12 +114,14 @@ yt-img-shadow#song-image img {
 /* Multi-layer ambient projector container */
 #am-player-ambient-wrapper {
   position: absolute;
-  top: calc(-1 * (15% + (var(--am-spread) * 45%)));
-  bottom: calc(-1 * (15% + (var(--am-spread) * 45%)));
-  left: calc(-1 * (15% + (var(--am-spread) * 45%)));
-  right: calc(-1 * (15% + (var(--am-spread) * 45%)));
-  width: calc(100% + 30% + (var(--am-spread) * 90%));
-  height: calc(100% + 30% + (var(--am-spread) * 90%));
+  /* Vertical (top/bottom) and horizontal (left/right) bloom are independent; must match
+     renderEdgeSpread() in content.js (margin = 15% + spread * 45% per axis). */
+  top: calc(-1 * (15% + (var(--am-spread-y, var(--am-spread)) * 45%)));
+  bottom: calc(-1 * (15% + (var(--am-spread-y, var(--am-spread)) * 45%)));
+  left: calc(-1 * (15% + (var(--am-spread-x, var(--am-spread)) * 45%)));
+  right: calc(-1 * (15% + (var(--am-spread-x, var(--am-spread)) * 45%)));
+  width: calc(100% + 30% + (var(--am-spread-x, var(--am-spread)) * 90%));
+  height: calc(100% + 30% + (var(--am-spread-y, var(--am-spread)) * 90%));
   pointer-events: none;
   z-index: 0;
   display: block;
@@ -357,6 +359,12 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
 .am-lyric-line:hover {
   filter: none;
   color: var(--ly-text);
+}
+
+.lyris-line:focus-visible {
+  outline: 2px solid var(--ly-signal);
+  outline-offset: 4px;
+  border-radius: 6px;
 }
 
 .lyris-line.current,
@@ -711,6 +719,7 @@ ruby.am-ruby rt {
    ========================================================================== */
 
 .lyris-settings {
+  box-sizing: border-box; /* 352px is the OUTER width, including padding + border */
   position: fixed;
   bottom: 84px;
   right: 24px;
@@ -1064,6 +1073,7 @@ ruby.am-ruby rt {
    ========================================================================== */
 
 #lyris-search-modal {
+  box-sizing: border-box;
   position: fixed;
   top: 50%;
   left: 50%;
@@ -1150,6 +1160,9 @@ ruby.am-ruby rt {
   border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
   text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
   transition: background 0.18s ease;
 }
 
@@ -1167,6 +1180,24 @@ ruby.am-ruby rt {
 .lyris-candidate-meta {
   font-size: 11px;
   color: var(--ly-muted);
+}
+
+/* Keyboard focus rings for all Lyris controls (YouTube Music's own CSS resets outlines) */
+.lyris-player-btn:focus-visible,
+.lyris-icon-btn:focus-visible,
+.lyris-nudge-btn:focus-visible,
+.lyris-nudge-reset:focus-visible,
+.lyris-foot-btn:focus-visible,
+.lyris-resume:focus-visible,
+.lyris-text-action:focus-visible,
+.lyris-search-btn:focus-visible,
+.lyris-candidate-item:focus-visible,
+.lyris-settings-tabs button:focus-visible,
+.lyris-setting input:focus-visible,
+.lyris-setting select:focus-visible,
+.lyris-setting-range input[type="range"]:focus-visible {
+  outline: 2px solid var(--ly-signal);
+  outline-offset: 2px;
 }
 
 /* ==========================================================================

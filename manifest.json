@@ -2,7 +2,8 @@
   "manifest_version": 3,
   "name": "Lyris — Lyrics in the light",
   "version": "1.0.0",
-  "description": "Apple-inspired synchronized lyrics, word and syllable karaoke, ambient light and Japanese readings for YouTube Music.",
+  "description": "Synced lyrics with word-by-word karaoke, ambient light, and offline Japanese readings for YouTube Music.",
+  "homepage_url": "https://github.com/Kwan-desu/lycris",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -29,11 +30,9 @@
     "https://music.youtube.com/*",
     "https://lrclib.net/*",
     "https://*.kugou.com/*",
-    "http://*.kugou.com/*",
     "https://*.163.com/*",
     "https://*.qq.com/*",
-    "https://clients5.google.com/*",
-    "https://translate.google.com/*"
+    "https://clients5.google.com/*"
   ],
   "content_scripts": [
     {

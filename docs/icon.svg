@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <clipPath id="sq"><rect x="8" y="8" width="112" height="112" rx="26.32"/></clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#191B1D"/><stop offset="1" stop-color="#0E0F10"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.15" cy="1.05" r="0.95">
+      <stop offset="0" stop-color="#FF7A59"/>
+      <stop offset="0.35" stop-color="#E5484D" stop-opacity="0.85"/>
+      <stop offset="0.75" stop-color="#8E2A55" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#8E2A55" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="1.05" cy="-0.05" r="0.7">
+      <stop offset="0" stop-color="#FFC46B" stop-opacity="0.85"/>
+      <stop offset="0.55" stop-color="#F08A4B" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#F08A4B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="dot"><stop offset="0" stop-color="#FFFFFF"/><stop offset="0.35" stop-color="#FFF4E0" stop-opacity="0.9"/><stop offset="1" stop-color="#FFD9A0" stop-opacity="0"/></radialGradient>
+    <linearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.62" stop-color="#F8F6F2"/>
+      <stop offset="0.62" stop-color="#F8F6F2" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#F8F6F2" stop-opacity="0.38"/>
+    </linearGradient>
+    <filter id="soft" x="-30%" y="-80%" width="160%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+  </defs>
+  <g clip-path="url(#sq)">
+    <rect x="0" y="0" width="128" height="128" fill="url(#bg)"/>
+    <rect x="0" y="0" width="128" height="128" fill="url(#glowA)"/>
+    <rect x="0" y="0" width="128" height="128" fill="url(#glowB)"/>
+    <!-- past line -->
+    <rect x="30.400000000000002" y="35.35" width="40.32" height="12.5" rx="6.25" fill="#F8F6F2" fill-opacity="0.5"/>
+    <!-- active line glow + sweep -->
+    <rect x="30.400000000000002" y="58.31" width="40.32" height="12.5" rx="6.25" fill="#FFFFFF" opacity="0.55" filter="url(#soft)"/>
+    <rect x="30.400000000000002" y="58.31" width="67.2" height="12.5" rx="6.25" fill="url(#sweep)"/>
+    <circle cx="72.06400000000001" cy="64.56" r="15.625" fill="url(#dot)" opacity="0.55"/>
+    <circle cx="72.06400000000001" cy="64.56" r="8.5" fill="#FFFFFF"/>
+    <!-- upcoming line -->
+    <rect x="30.400000000000002" y="81.27" width="51.52" height="12.5" rx="6.25" fill="#F8F6F2" fill-opacity="0.5"/>
+  </g>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="26.32" fill="none" stroke="#FFFFFF" stroke-opacity="0.08"/>
+</svg>

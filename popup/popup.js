@@ -18,7 +18,7 @@ const DEFAULT_SETTINGS = {
     'lrclib': true,
     'netease': true,
     'kugou': true,
-    'qq': true,
+    'qq': false, // Disabled by default: QQ's public endpoint frequently returns HTTP 500; opt-in via Sources
     'youtube-cc': true,
     'native': true
   },
@@ -43,7 +43,7 @@ const PROVIDER_LABELS = {
   'lrclib': 'LRCLIB (Western & Global)',
   'netease': 'Netease (Japanese, Anime, Asian)',
   'kugou': 'Kugou (International & Asian)',
-  'qq': 'QQ Music (International & Asian)',
+  'qq': 'QQ Music (Off by default — opt-in)',
   'youtube-cc': 'YouTube Captions (CC)',
   'native': 'YouTube Music Native Lyrics'
 };
@@ -201,7 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const check = document.createElement('input');
       check.type = 'checkbox';
-      check.checked = enabled[id] !== false;
+      // QQ runs only when explicitly enabled (background.js requires qq === true);
+      // all other providers are on unless explicitly disabled.
+      check.checked = id === 'qq' ? (enabled.qq === true) : (enabled[id] !== false);
       check.addEventListener('change', () => {
         enabled[id] = check.checked;
         settings.enabledProviders = enabled;

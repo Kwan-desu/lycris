@@ -22,7 +22,7 @@
       'lrclib': true,
       'netease': true,
       'kugou': true,
-      'qq': true,
+      'qq': false, // Disabled by default: QQ's public endpoint frequently returns HTTP 500; opt-in via Sources
       'youtube-cc': true,
       'native': true
     },
@@ -51,6 +51,13 @@
   ];
 
   let settings = { ...DEFAULT_SETTINGS };
+
+  // Independent outer-edge spread multipliers for the ambient projector.
+  // Horizontal (left/right) and vertical (top/bottom) bloom are scaled separately so the glow
+  // stays balanced around YouTube Music's right-aligned player. Mirrored into CSS as
+  // --am-spread-x / --am-spread-y by applySettingsToDOM().
+  const AMBIENT_SPREAD_X = 1.0;
+  const AMBIENT_SPREAD_Y = 1.0;
 
   // Runtime State
   let currentTrackKey = '';
@@ -95,27 +102,30 @@
   function loadSettings() {
     if (isExtensionValid() && chrome.storage && chrome.storage.sync) {
       try {
-        chrome.storage.sync.get(DEFAULT_SETTINGS, (stored) => {
-          if (stored) {
-            settings = { ...DEFAULT_SETTINGS, ...stored };
-            if (stored.ambientIntensity !== undefined && stored.ambientBrightness === undefined) {
-              settings.ambientBrightness = stored.ambientIntensity;
-            }
-            if (stored.ambientLighting !== undefined && stored.ambientEnabled === undefined) {
-              settings.ambientEnabled = stored.ambientLighting;
-            }
-            if (settings.highlightStyle === 'color-neon') {
-              settings.highlightStyle = 'gradient-wipe';
-            }
-            if (stored.appleMode !== undefined && stored.lyricsEnabled === undefined) {
-              settings.lyricsEnabled = stored.appleMode;
-            }
-            if (stored.japaneseMode !== undefined) {
-              settings.japaneseMode = stored.japaneseMode;
-            }
-            applySettingsToDOM();
-            updateLyrisSettingsUI();
+        // Fetch ALL stored keys (null), not just DEFAULT_SETTINGS keys, so legacy migration
+        // can detect keys that are genuinely absent from storage (e.g. ambientBrightness).
+        chrome.storage.sync.get(null, (storedAll) => {
+          const stored = storedAll || {};
+          // Start from defaults, overlay stored values.
+          settings = { ...DEFAULT_SETTINGS, ...stored };
+          // Legacy key migrations: only apply when the modern key was never stored.
+          if (stored.ambientIntensity !== undefined && stored.ambientBrightness === undefined) {
+            settings.ambientBrightness = stored.ambientIntensity;
           }
+          if (stored.ambientLighting !== undefined && stored.ambientEnabled === undefined) {
+            settings.ambientEnabled = stored.ambientLighting;
+          }
+          if (settings.highlightStyle === 'color-neon') {
+            settings.highlightStyle = 'gradient-wipe';
+          }
+          if (stored.appleMode !== undefined && stored.lyricsEnabled === undefined) {
+            settings.lyricsEnabled = stored.appleMode;
+          }
+          if (stored.japaneseMode !== undefined) {
+            settings.japaneseMode = stored.japaneseMode;
+          }
+          applySettingsToDOM();
+          updateLyrisSettingsUI();
         });
       } catch (e) {}
     }
@@ -333,6 +343,8 @@
     root.style.setProperty('--am-font-size', `${fontVal}px`);
     root.style.setProperty('--am-blur', `${blurPx}px`);
     root.style.setProperty('--am-spread', spreadRatio);
+    root.style.setProperty('--am-spread-x', (spreadVal / 100 * AMBIENT_SPREAD_X).toFixed(3));
+    root.style.setProperty('--am-spread-y', (spreadVal / 100 * AMBIENT_SPREAD_Y).toFixed(3));
     root.style.setProperty('--am-spread-scale', spreadScale);
     root.style.setProperty('--am-brightness', `${brightnessVal}%`);
     root.style.setProperty('--am-saturation', `${satVal}%`);
@@ -568,11 +580,12 @@
     return escapeHTML(text);
   }
 
-  let isTranslatingLyrics = false;
+  let isTranslatingKey = null;
 
   function fetchTranslationForCurrentLyrics() {
-    if (isTranslatingLyrics) return;
     if (!settings.translationEnabled) return;
+    // Guard against a duplicate request for the SAME track only; a different track may proceed
+    if (isTranslatingKey !== null && isTranslatingKey === currentTrackKey) return;
 
     const hasJp = (currentLyrics.isSynced && currentLyrics.lines.some(l => containsJapanese(l.text))) ||
                   (!currentLyrics.isSynced && containsJapanese(currentLyrics.plainText));
@@ -593,17 +606,23 @@
 
     if (rawLines.length === 0) return;
 
-    isTranslatingLyrics = true;
     const key = currentTrackKey;
+    isTranslatingKey = key;
 
     safeSendMessage({
       action: 'TRANSLATE_LYRICS',
       lines: rawLines,
       cacheKey: key
     }, (response) => {
-      isTranslatingLyrics = false;
+      // Only release the in-flight marker if it still belongs to THIS request, so a late
+      // callback for an old track can't clear a newer track's in-progress translation.
+      if (isTranslatingKey === key) isTranslatingKey = null;
+      if (key !== currentTrackKey) {
+        // Song changed while fetching — discard and attempt translation for the new track
+        if (settings.translationEnabled) fetchTranslationForCurrentLyrics();
+        return;
+      }
       if (response && response.success && Array.isArray(response.translations)) {
-        if (key !== currentTrackKey) return; // Song changed while fetching
         currentLyrics.translations = response.translations;
         if (currentLyrics.isSynced) {
           currentLyrics.lines.forEach((line, idx) => {
@@ -766,7 +785,8 @@
 
       ctx.clearRect(0, 0, targetW, targetH);
 
-      const spreadRatio = (spreadVal || 42) / 100.0;
+      const spreadNum = (typeof spreadVal === 'number' && isFinite(spreadVal)) ? spreadVal : 42;
+      const spreadRatio = spreadNum / 100.0;
 
       // 1. Calculate player container dimensions
       const playerContainer = document.querySelector('ytmusic-player#player') ||
@@ -807,22 +827,25 @@
       const fracW = visW / pWidth;
       const fracH = visH / pHeight;
 
-      // 4. Symmetrical margin expansion in ALL directions (matches content.css wrapper)
-      const marginFactor = 0.15 + spreadRatio * 0.45;
-      const totalScale = 1.0 + 2.0 * marginFactor;
+      // 4. Independent horizontal / vertical margin expansion (must match content.css wrapper,
+      //    which uses --am-spread-x / --am-spread-y). Left/right use the X factor, top/bottom the Y factor.
+      const marginX = 0.15 + spreadRatio * 0.45 * AMBIENT_SPREAD_X;
+      const marginY = 0.15 + spreadRatio * 0.45 * AMBIENT_SPREAD_Y;
+      const totalScaleX = 1.0 + 2.0 * marginX;
+      const totalScaleY = 1.0 + 2.0 * marginY;
 
-      // 5. Perfectly centered video coordinates inside the ambient canvas
-      const vx = Math.round(targetW * ((marginFactor + fracX) / totalScale));
-      const vy = Math.round(targetH * ((marginFactor + fracY) / totalScale));
-      const vw = Math.round(targetW * (fracW / totalScale));
-      const vh = Math.round(targetH * (fracH / totalScale));
+      // 5. Video coordinates inside the ambient canvas
+      const vx = Math.round(targetW * ((marginX + fracX) / totalScaleX));
+      const vy = Math.round(targetH * ((marginY + fracY) / totalScaleY));
+      const vw = Math.round(targetW * (fracW / totalScaleX));
+      const vh = Math.round(targetH * (fracH / totalScaleY));
 
       // 6. Sample perimeter edge strips (4% depth)
       const dx = Math.max(2, Math.round(sw * 0.04));
       const dy = Math.max(2, Math.round(sh * 0.04));
 
       // 7. High-density edge count: fine, dense bands (30 to 80 bands)
-      const numBands = Math.max(30, Math.min(80, Math.round((spreadVal || 42) * 0.45) + 16));
+      const numBands = Math.max(30, Math.min(80, Math.round(spreadNum * 0.45) + 16));
 
       // 8. Draw concentric bands from outer to inner
       for (let k = numBands; k >= 1; k--) {
@@ -1209,6 +1232,15 @@
     if (!title) {
       const titleElem = document.querySelector('ytmusic-player-bar .title');
       if (titleElem) title = titleElem.textContent.trim();
+    } else {
+      // MediaSession can carry a localized/shortened title (seen live: "Idol" while the player bar
+      // shows "アイドル - Idol"). Prefer the player-bar title when it contains the MediaSession title
+      // (a stale bar title from the previous track won't, so track changes stay safe).
+      const barElem = document.querySelector('ytmusic-player-bar .title');
+      const barTitle = barElem ? (barElem.getAttribute('title') || barElem.textContent || '').trim() : '';
+      if (barTitle && barTitle !== title && barTitle.toLowerCase().includes(title.toLowerCase())) {
+        title = barTitle;
+      }
     }
 
     if (!artist) {
@@ -1291,7 +1323,9 @@
 
   function renderCurrentLyricsState() {
     hideNativeLyricsUnavailableMessage();
-    if (isLoadingLyrics) {
+    if (currentTrackKey === '__ad__') {
+      renderAdState();
+    } else if (isLoadingLyrics) {
       renderLoadingState(getCurrentTrackInfo().title);
     } else if (currentLyrics.isSynced && currentLyrics.lines.length > 0) {
       renderLyricsUI();
@@ -1827,12 +1861,13 @@
 
         resultsContainer.innerHTML = '';
         response.candidates.forEach(cand => {
-          const item = document.createElement('div');
+          const item = document.createElement('button');
+          item.type = 'button';
           item.className = 'lyris-candidate-item';
           const durSec = cand.duration ? `${Math.floor(cand.duration / 60)}:${String(Math.floor(cand.duration % 60)).padStart(2, '0')}` : '';
           item.innerHTML = `
-            <div class="lyris-candidate-title">${escapeHTML(cand.title || 'Unknown Title')}</div>
-            <div class="lyris-candidate-meta">${escapeHTML(cand.artist || 'Unknown Artist')} • ${escapeHTML(cand.source || 'LRCLIB')} ${durSec ? '• ' + durSec : ''} ${cand.synced ? '• ⏱ Synced' : '• Plain'}</div>
+            <span class="lyris-candidate-title">${escapeHTML(cand.title || 'Unknown Title')}</span>
+            <span class="lyris-candidate-meta">${escapeHTML(cand.artist || 'Unknown Artist')} • ${escapeHTML(cand.source || 'LRCLIB')} ${durSec ? '• ' + durSec : ''} ${cand.synced === true ? '• ⏱ Synced' : (cand.synced === false ? '• Plain' : '')}</span>
           `;
           item.addEventListener('click', () => {
             resultsContainer.innerHTML = '<div style="font-size:12px;color:var(--ly-muted);text-align:center;padding:16px;">Loading candidate lyrics…</div>';
@@ -1840,6 +1875,10 @@
               if (res && res.success && res.lyrics) {
                 const trackInfo = getCurrentTrackInfo();
                 const trackKey = `${trackInfo.cleanTitle}__${trackInfo.cleanArtist}`.toLowerCase();
+                // Cancel any in-flight automatic fetch so it cannot overwrite the user's chosen lyrics
+                currentFetchRequestId++;
+                isLoadingLyrics = false;
+                currentTrackKey = trackKey;
                 currentLyrics = {
                   isSynced: res.synced,
                   lines: res.synced ? parseLRC(res.lyrics) : [],
@@ -1862,10 +1901,13 @@
     });
   }
 
+  let searchModalReturnFocus = null;
+
   function openSearchModal(defaultQuery) {
     injectSearchModal();
     const modal = document.getElementById('lyris-search-modal');
     if (!modal) return;
+    searchModalReturnFocus = document.activeElement;
     modal.hidden = false;
     const input = modal.querySelector('#lyris-search-input');
     if (input) {
@@ -1879,6 +1921,11 @@
   function closeSearchModal() {
     const modal = document.getElementById('lyris-search-modal');
     if (modal) modal.hidden = true;
+    // Return focus to whatever opened the modal (e.g. the "Wrong song?" footer button)
+    if (searchModalReturnFocus && searchModalReturnFocus.isConnected && typeof searchModalReturnFocus.focus === 'function') {
+      searchModalReturnFocus.focus();
+    }
+    searchModalReturnFocus = null;
   }
 
   function injectLyrisSettings() {
@@ -1894,10 +1941,11 @@
     panel.innerHTML = `
       <div class="lyris-settings-head">
         <div class="lyris-brand">
-          <svg class="lyris-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 18V5l12-2v13"></path>
-            <circle cx="6" cy="18" r="3"></circle>
-            <circle cx="18" cy="16" r="3"></circle>
+          <svg class="lyris-mark-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="5" width="9" height="3" rx="1.5" fill="currentColor" opacity="0.5"></rect>
+            <rect x="4" y="10.5" width="15" height="3" rx="1.5" fill="currentColor"></rect>
+            <circle cx="13.3" cy="12" r="2.2" fill="#fff"></circle>
+            <rect x="4" y="16" width="11.5" height="3" rx="1.5" fill="currentColor" opacity="0.5"></rect>
           </svg>
           <span class="lyris-wordmark">lyris</span>
         </div>
@@ -1969,7 +2017,7 @@
               <span>Spread</span>
               <output id="lyris-spread-val">42%</output>
             </div>
-            <input type="range" id="lyris-opt-spread" min="0" max="200" step="1" value="42">
+            <input type="range" id="lyris-opt-spread" min="0" max="400" step="1" value="42">
           </div>
           <div class="lyris-setting-range">
             <div class="lyris-range-label">
@@ -1997,7 +2045,7 @@
 
         <!-- Sources Pane -->
         <div class="lyris-pane" id="lyris-pane-sources" hidden>
-          <p class="lyris-settings-note">Drag or use arrows to order provider waterfall priority.</p>
+          <p class="lyris-settings-note">Checked top to bottom. Use the arrows to change waterfall priority.</p>
           <div class="lyris-sources-list" id="lyris-sources-container"></div>
           <button class="lyris-text-action" id="lyris-reset-sources-btn">Reset provider order</button>
         </div>
@@ -2026,7 +2074,7 @@
       });
     });
 
-    panel.querySelector('#lyris-settings-close-btn').addEventListener('click', closeLyrisSettings);
+    panel.querySelector('#lyris-settings-close-btn').addEventListener('click', () => closeLyrisSettings(true));
 
     setupLyrisSettingsControls(panel);
     updateLyrisSettingsUI();
@@ -2297,12 +2345,11 @@
       resetSourcesBtn.addEventListener('click', () => {
         settings.providerOrder = [...DEFAULT_SETTINGS.providerOrder];
         settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
-        saveSetting('providerOrder', settings.providerOrder);
-        saveSetting('enabledProviders', settings.enabledProviders);
+        // Single atomic write -> one storage.onChanged event -> one lyrics reload
+        try {
+          chrome.storage.sync.set({ providerOrder: settings.providerOrder, enabledProviders: settings.enabledProviders });
+        } catch (e) {}
         renderSourcesListUI();
-        lyricsCache.clear();
-        safeSendMessage({ action: 'CLEAR_CACHE' });
-        loadLyricsForCurrentTrack(true);
         showToast('Provider order reset to defaults');
       });
     }
@@ -2390,7 +2437,9 @@
     };
 
     order.forEach((providerId, index) => {
-      const isChecked = enabled[providerId] !== false;
+      // QQ runs only when explicitly enabled (background.js requires qq === true);
+      // all other providers are on unless explicitly disabled.
+      const isChecked = providerId === 'qq' ? (enabled.qq === true) : (enabled[providerId] !== false);
       const row = document.createElement('div');
       row.className = 'lyris-source-row';
 
@@ -2410,9 +2459,7 @@
         enabled[providerId] = chk.checked;
         settings.enabledProviders = { ...enabled };
         saveSetting('enabledProviders', settings.enabledProviders);
-        lyricsCache.clear();
-        safeSendMessage({ action: 'CLEAR_CACHE' });
-        loadLyricsForCurrentTrack(true);
+        // Reload is handled once by the storage.onChanged listener (providerOrder/enabledProviders)
       });
 
       const upBtn = row.querySelector('[data-action="up"]');
@@ -2424,9 +2471,6 @@
           settings.providerOrder = [...order];
           saveSetting('providerOrder', settings.providerOrder);
           renderSourcesListUI();
-          lyricsCache.clear();
-          safeSendMessage({ action: 'CLEAR_CACHE' });
-          loadLyricsForCurrentTrack(true);
         });
       }
 
@@ -2439,9 +2483,6 @@
           settings.providerOrder = [...order];
           saveSetting('providerOrder', settings.providerOrder);
           renderSourcesListUI();
-          lyricsCache.clear();
-          safeSendMessage({ action: 'CLEAR_CACHE' });
-          loadLyricsForCurrentTrack(true);
         });
       }
 
@@ -2463,14 +2504,16 @@
     }
   }
 
-  function closeLyrisSettings() {
+  function closeLyrisSettings(restoreFocus = true) {
     const panel = document.getElementById('lyris-settings');
     if (panel) panel.hidden = true;
     const trigger = document.getElementById('lyris-settings-btn');
     if (trigger) {
       trigger.classList.remove('active');
       trigger.setAttribute('aria-expanded', 'false');
-      trigger.focus();
+      // Return focus to the trigger only for keyboard/explicit closes, never when the user
+      // dismissed the panel by clicking something else (that would steal their focus).
+      if (restoreFocus === true) trigger.focus();
     }
   }
 
@@ -2487,28 +2530,34 @@
     toggleLyrisSettings();
   }
 
-  // Global Esc key and click outside listener
+  // Global Esc key and click outside listener.
+  // Capture phase + stopPropagation so Esc closes OUR dialog without also triggering
+  // YouTube Music's own Esc handling (e.g. collapsing the player page).
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       const settingsPanel = document.getElementById('lyris-settings');
       if (settingsPanel && !settingsPanel.hidden) {
-        closeLyrisSettings();
+        e.preventDefault();
+        e.stopPropagation();
+        closeLyrisSettings(true);
         return;
       }
       const searchModal = document.getElementById('lyris-search-modal');
       if (searchModal && !searchModal.hidden) {
+        e.preventDefault();
+        e.stopPropagation();
         closeSearchModal();
         return;
       }
     }
-  });
+  }, true);
 
   window.addEventListener('click', (e) => {
     const panel = document.getElementById('lyris-settings');
     const trigger = document.getElementById('lyris-settings-btn');
     if (panel && !panel.hidden) {
       if (!panel.contains(e.target) && !trigger?.contains(e.target)) {
-        closeLyrisSettings();
+        closeLyrisSettings(false);
       }
     }
   });
@@ -2702,6 +2751,17 @@
       }
 
       lineElem.title = 'Click to seek • Alt+Click to calibrate audio sync';
+      // Keyboard access: lines are focusable and Enter/Space behave like a click
+      // (Alt/Shift+Enter calibrates, mirroring Alt/Shift+Click).
+      lineElem.tabIndex = 0;
+      lineElem.setAttribute('role', 'button');
+      lineElem.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation(); // don't let the scroll container treat Space as manual browsing
+          lineElem.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: e.altKey, shiftKey: e.shiftKey }));
+        }
+      });
       lineElem.addEventListener('click', (e) => {
         const video = document.querySelector('video');
         if (!video) return;
@@ -3051,8 +3111,38 @@
 
   let durationRetryCount = 0;
   let lastDurationRetryKey = '';
+  let durationRetryTimer = null;
+
+  function isAdPlaying() {
+    const player = document.querySelector('#movie_player');
+    if (player && (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting'))) return true;
+    const byline = document.querySelector('ytmusic-player-bar .byline');
+    return !!(byline && /video will play after ad/i.test(byline.textContent || ''));
+  }
+
+  function renderAdState() {
+    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
+    if (!listContainer) return;
+    listContainer.classList.remove('lyris-plain');
+    listContainer.innerHTML = `
+      <div class="lyris-state">
+        <h3>Lyrics after the ad</h3>
+        <p>Lyris will load lyrics as soon as your song starts.</p>
+      </div>
+    `;
+  }
 
   function loadLyricsForCurrentTrack(forceReload = false) {
+    // During ads the player reports the ad as the current track; never search for it.
+    if (isAdPlaying()) {
+      if (currentTrackKey === '__ad__') return; // already showing the ad state
+      currentFetchRequestId++;
+      currentTrackKey = '__ad__';
+      currentLyrics = { isSynced: false, lines: [], plainText: '', source: 'none' };
+      isLoadingLyrics = false;
+      renderAdState();
+      return;
+    }
     const trackInfo = getCurrentTrackInfo();
     const trackKey = `${trackInfo.cleanTitle}__${trackInfo.cleanArtist}`.toLowerCase();
 
@@ -3065,14 +3155,21 @@
     if (video && (isNaN(video.duration) || video.duration === 0)) {
       if (durationRetryCount < 6) {
         durationRetryCount++;
-        setTimeout(() => loadLyricsForCurrentTrack(forceReload), 400);
+        // Keep a single retry timer so repeated watcher calls don't stack multiple retries
+        clearTimeout(durationRetryTimer);
+        durationRetryTimer = setTimeout(() => loadLyricsForCurrentTrack(forceReload), 400);
         return;
       }
     }
+    clearTimeout(durationRetryTimer);
+    durationRetryTimer = null;
     durationRetryCount = 0;
 
     if (!trackInfo.cleanTitle && !trackInfo.title) return;
-    if (!forceReload && trackKey === currentTrackKey && currentLyrics.lines.length > 0) return;
+    // Skip if this exact track is already loaded, already loading, or cached — prevents
+    // duplicate FETCH_LYRICS requests from the 500ms watcher firing during a load.
+    if (!forceReload && trackKey === currentTrackKey &&
+        (isLoadingLyrics || lyricsCache.has(trackKey) || currentLyrics.lines.length > 0)) return;
 
     if (forceReload) {
       lyricsCache.delete(trackKey);
@@ -3083,8 +3180,11 @@
     userScrolled = false;
 
     // Immediately hide the resume sync button on song transition
-    const resumeBtn = document.getElementById('am-resume-scroll-btn');
-    if (resumeBtn) resumeBtn.classList.remove('visible');
+    const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+    if (resumeBtn) {
+      resumeBtn.hidden = true;
+      resumeBtn.classList.remove('visible');
+    }
 
     // Preload artwork immediately to avoid ambient flicker
     if (trackInfo.artwork) {
@@ -3297,8 +3397,11 @@
       video.addEventListener('seeking', () => updateActiveLine());
       video.addEventListener('seeked', () => {
         userScrolled = false;
-        const resumeBtn = document.getElementById('am-resume-scroll-btn');
-        if (resumeBtn) resumeBtn.classList.remove('visible');
+        const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+        if (resumeBtn) {
+          resumeBtn.hidden = true;
+          resumeBtn.classList.remove('visible');
+        }
         updateActiveLine();
         scrollToActiveLine(true);
       });
@@ -3443,7 +3546,18 @@
     setupWatchers();
     loadLyricsForCurrentTrack();
     requestAnimationFrame(timeSyncLoop);
-    console.log('[AM-Lyrics] Ambient Light & Synced Lyrics initialized.');
+    console.log('[Lyris] Lyrics in the light — ambient light & synced lyrics initialized.');
+  }
+
+  // Test-only hook: lets the Node test suite (tests/) reach pure helpers inside this IIFE.
+  // The global is never defined on music.youtube.com, so this is a no-op in production.
+  if (typeof globalThis.__LYRIS_TEST_HOOK__ === 'function') {
+    globalThis.__LYRIS_TEST_HOOK__({
+      parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
+      hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
+      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS
+    });
+    return;
   }
 
   if (document.readyState === 'loading') {

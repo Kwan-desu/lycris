@@ -64,8 +64,16 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
 function fetchWithTimeout(url, options = {}, timeoutMs = 1500) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // The timer is intentionally NOT cleared the instant response headers arrive. Clearing it
+  // there (the previous ".finally" behavior) left the subsequent body read (resp.json())
+  // without any timeout. Instead the abort stays armed until the whole operation completes;
+  // calling abort() after a request has already settled is a harmless no-op. We clear the
+  // timer on rejection to avoid a dangling handle on network errors.
   return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+    .catch(err => {
+      clearTimeout(timer);
+      throw err;
+    });
 }
 
 async function handleFetchLyrics(trackInfo, customOrder, enabledProviders) {
@@ -650,16 +658,35 @@ function selectBestCandidate(candidates, targetTitle, targetArtist, targetDurati
   };
 
   // Prioritize synced candidates first
-  const syncedCandidates = candidates.filter(c => c && c.syncedLyrics);
+  const syncedCandidates = candidates.filter(c => c && isUsableLyrics(c.syncedLyrics, true));
   const syncedMatch = evaluatePool(syncedCandidates);
   if (syncedMatch) return syncedMatch;
 
   // Fallback to plain lyrics candidates
-  const plainCandidates = candidates.filter(c => c && c.plainLyrics);
+  const plainCandidates = candidates.filter(c => c && isUsableLyrics(c.plainLyrics, false))
+    .map(c => (c.syncedLyrics && !isUsableLyrics(c.syncedLyrics, true)) ? { ...c, syncedLyrics: null } : c);
   return evaluatePool(plainCandidates);
 }
 
 // --- Providers ---
+
+/**
+ * Reject junk / vandalised lyric entries (seen live on LRCLIB: an exact match whose entire
+ * synced lyric was "[00:00.00]probe"). A usable lyric needs a few real lines.
+ */
+const MIN_LYRIC_LINES = 4;
+function countLyricLines(text, synced) {
+  if (!text || typeof text !== 'string') return 0;
+  return text.split('\n').filter(l => {
+    if (!synced) return l.trim().length > 0;
+    const hasTime = /\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]/.test(l);
+    const body = l.replace(/\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]/g, '').trim();
+    return hasTime && body.length > 0;
+  }).length;
+}
+function isUsableLyrics(text, synced) {
+  return countLyricLines(text, synced) >= MIN_LYRIC_LINES;
+}
 
 async function fetchFromLrclib(title, artist, duration, isCoverSong = false) {
   if (typeof artist === 'number' && duration === undefined) {
@@ -671,7 +698,7 @@ async function fetchFromLrclib(title, artist, duration, isCoverSong = false) {
   const cleanA = cleanArtistName(artist || '');
   const primaryA = getPrimaryArtist(cleanA);
 
-  const userAgent = 'LycrisLyrics/1.0.0 (https://github.com/Kwan-desu/lycris)';
+  const userAgent = 'Lyris/1.0.0 (https://github.com/Kwan-desu/lycris)';
   const headers = { 'User-Agent': userAgent };
 
   let plainFallback = null;
@@ -691,10 +718,10 @@ async function fetchFromLrclib(title, artist, duration, isCoverSong = false) {
         .then(async resp => {
           if (!resp.ok) return null;
           const data = await resp.json();
-          if (data && data.syncedLyrics) {
+          if (data && isUsableLyrics(data.syncedLyrics, true)) {
             return { type: 'exact_synced', match: { success: true, synced: true, lyrics: data.syncedLyrics, source: 'LRCLIB (Exact)' } };
           }
-          if (data && data.plainLyrics) {
+          if (data && isUsableLyrics(data.plainLyrics, false)) {
             return { type: 'exact_plain', match: { success: true, synced: false, lyrics: data.plainLyrics, source: 'LRCLIB (Exact)' } };
           }
           return null;
@@ -845,13 +872,17 @@ async function fetchFromNetease(query, targetTitle, targetArtist, targetDuration
         }
       }
 
-      const lyricUrl = `https://music.163.com/api/song/lyric?id=${song.id}&lv=1&kv=1&tv=-1`;
-      const lyricResp = await fetchWithTimeout(lyricUrl, { headers: { 'Referer': 'https://music.163.com' } }, 1500);
-      if (!lyricResp.ok) continue;
-      const lyricData = await lyricResp.json();
-      const lrc = lyricData?.lrc?.lyric;
-      if (lrc && lrc.includes('[0')) {
-        return { success: true, synced: true, lyrics: lrc, source: 'Netease' };
+      try {
+        const lyricUrl = `https://music.163.com/api/song/lyric?id=${song.id}&lv=1&kv=1&tv=-1`;
+        const lyricResp = await fetchWithTimeout(lyricUrl, { headers: { 'Referer': 'https://music.163.com' } }, 1500);
+        if (!lyricResp.ok) continue;
+        const lyricData = await lyricResp.json();
+        const lrc = lyricData?.lrc?.lyric;
+        if (isUsableLyrics(lrc, true)) {
+          return { success: true, synced: true, lyrics: lrc, source: 'Netease' };
+        }
+      } catch (e) {
+        continue; // One failed/timed-out candidate should not abort the remaining candidates
       }
     }
   } catch (e) {}
@@ -912,27 +943,31 @@ async function fetchFromKugou(query, targetTitle, targetArtist, targetDuration, 
       const hash = song.FileHash || song.HQFileHash || song.SQFileHash;
       if (!hash) continue;
 
-      const lrcUrl = `https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=${song.Duration || ''}&hash=${hash}`;
-      const lrcResp = await fetchWithTimeout(lrcUrl, {}, 1500);
-      if (!lrcResp.ok) continue;
+      try {
+        const lrcUrl = `https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=${song.Duration || ''}&hash=${hash}`;
+        const lrcResp = await fetchWithTimeout(lrcUrl, {}, 1500);
+        if (!lrcResp.ok) continue;
 
-      const lrcData = await lrcResp.json();
-      const candidate = lrcData?.candidates?.[0];
-      if (!candidate?.id || !candidate?.accesskey) continue;
+        const lrcData = await lrcResp.json();
+        const candidate = lrcData?.candidates?.[0];
+        if (!candidate?.id || !candidate?.accesskey) continue;
 
-      const downUrl = `https://krcs.kugou.com/download?ver=1&client=mobi&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc`;
-      const downResp = await fetchWithTimeout(downUrl, {}, 1500);
-      if (!downResp.ok) continue;
+        const downUrl = `https://krcs.kugou.com/download?ver=1&client=mobi&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc`;
+        const downResp = await fetchWithTimeout(downUrl, {}, 1500);
+        if (!downResp.ok) continue;
 
-      const downData = await downResp.json();
-      if (!downData?.content) continue;
+        const downData = await downResp.json();
+        if (!downData?.content) continue;
 
-      const binaryStr = atob(downData.content);
-      const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
-      const decodedLrc = new TextDecoder('utf-8').decode(bytes);
+        const binaryStr = atob(downData.content);
+        const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+        const decodedLrc = new TextDecoder('utf-8').decode(bytes);
 
-      if (decodedLrc && decodedLrc.includes('[0')) {
-        return { success: true, synced: true, lyrics: decodedLrc, source: 'Kugou' };
+        if (isUsableLyrics(decodedLrc, true)) {
+          return { success: true, synced: true, lyrics: decodedLrc, source: 'Kugou' };
+        }
+      } catch (e) {
+        continue; // One failed/timed-out candidate should not abort the remaining candidates
       }
     }
   } catch (e) {}
@@ -996,20 +1031,24 @@ async function fetchFromQQ(query, targetTitle, targetArtist, targetDuration, isC
         }
       }
 
-      const lyricUrl = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${song.songmid}&format=json&nobase64=1`;
-      const lyricResp = await fetchWithTimeout(lyricUrl, { headers: { 'Referer': 'https://y.qq.com/' } }, 1500);
-      if (!lyricResp.ok) continue;
-      const lyricData = await lyricResp.json();
-      let lrc = lyricData?.lyric;
-      if (lrc) {
-        if (!lrc.includes('[0') && /^[A-Za-z0-9+/=]+$/.test(lrc.trim())) {
-          try {
-            lrc = atob(lrc);
-          } catch (e) {}
+      try {
+        const lyricUrl = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${song.songmid}&format=json&nobase64=1`;
+        const lyricResp = await fetchWithTimeout(lyricUrl, { headers: { 'Referer': 'https://y.qq.com/' } }, 1500);
+        if (!lyricResp.ok) continue;
+        const lyricData = await lyricResp.json();
+        let lrc = lyricData?.lyric;
+        if (lrc) {
+          if (!lrc.includes('[0') && /^[A-Za-z0-9+/=]+$/.test(lrc.trim())) {
+            try {
+              lrc = atob(lrc);
+            } catch (e) {}
+          }
+          if (isUsableLyrics(lrc, true)) {
+            return { success: true, synced: true, lyrics: lrc, source: 'QQ Music' };
+          }
         }
-        if (lrc && lrc.includes('[0')) {
-          return { success: true, synced: true, lyrics: lrc, source: 'QQ Music' };
-        }
+      } catch (e) {
+        continue; // One failed/timed-out candidate should not abort the remaining candidates
       }
     }
   } catch (e) {}
@@ -1068,7 +1107,7 @@ async function handleSearchCandidates(query) {
   const q = query.trim();
   const candidates = [];
 
-  const userAgent = 'LyrisLyrics/1.0.0 (https://github.com/Kwan-desu/lycris)';
+  const userAgent = 'Lyris/1.0.0 (https://github.com/Kwan-desu/lycris)';
   const headers = { 'User-Agent': userAgent };
 
   // 1. Search LRCLIB
@@ -1117,7 +1156,7 @@ async function handleSearchCandidates(query) {
               artist: artists,
               album: song.album?.name || '',
               duration: Math.round((song.duration || 0) / 1000),
-              synced: true,
+              synced: null, // unknown until the lyric is fetched; UI shows no sync badge
               lyrics: '',
               source: 'NetEase'
             });
