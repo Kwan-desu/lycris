@@ -340,11 +340,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   transform: scale(1.15);
 }
 
-/* Select Dropdown */
 .select-input {
-  background: rgba(255, 255, 255, 0.08);
+  background: #1b1e1f;
   border: 1px solid var(--ly-rule);
   color: var(--ly-text);
+  color-scheme: dark;
   font-size: 12px;
   padding: 6px 10px;
   border-radius: 8px;
@@ -356,6 +356,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .select-input:focus {
   border-color: var(--ly-signal);
+}
+
+.select-input option {
+  background: #171a1b !important;
+  color: #f8f6f2 !important;
+  font-size: 12px;
+  padding: 8px 12px;
 }
 
 /* Offset Buttons */

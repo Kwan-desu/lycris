@@ -219,15 +219,11 @@ ytmusic-player-page #side-panel,
   display: none !important;
 }
 
-/* Hide native "Lyrics not available" message */
+/* Hide native "Lyrics not available" message specifically in lyrics tab */
 ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] ytmusic-message-renderer,
 ytmusic-tab-renderer[tab-id="FEmusic_lyrics"] ytmusic-message-renderer,
-#side-panel ytmusic-message-renderer,
-#side-panel .message.ytmusic-message-renderer,
-ytmusic-section-list-renderer:has(#lyris-lyrics-wrapper) ytmusic-message-renderer,
-ytmusic-tab-renderer:has(#lyris-lyrics-wrapper) ytmusic-message-renderer,
-#contents:has(#lyris-lyrics-wrapper) ytmusic-message-renderer,
-ytmusic-player-page ytmusic-message-renderer {
+ytmusic-tab-renderer[page-type="MUSIC_PAGE_TYPE_TRACK_LYRICS"] .message.ytmusic-message-renderer,
+ytmusic-tab-renderer[tab-id="FEmusic_lyrics"] .message.ytmusic-message-renderer {
   display: none !important;
   visibility: hidden !important;
   height: 0 !important;
@@ -733,6 +729,7 @@ ruby.am-ruby rt {
   -webkit-backdrop-filter: blur(24px);
   font-family: var(--ly-font);
   color: var(--ly-text);
+  color-scheme: dark;
   display: flex;
   flex-direction: column;
 }
@@ -851,15 +848,31 @@ ruby.am-ruby rt {
 }
 
 .lyris-setting select {
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ly-text);
+  background: #1c2022;
+  color: #f8f6f2;
+  color-scheme: dark;
   font-size: 12px;
-  padding: 6px 10px;
-  max-width: 155px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 6px 12px;
+  min-width: 130px;
+  max-width: 160px;
   cursor: pointer;
   outline: none;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.lyris-setting select:focus {
+  border-color: var(--ly-signal);
+}
+
+.lyris-setting select option {
+  background: #171a1b !important;
+  color: #f8f6f2 !important;
+  font-size: 12px;
+  padding: 8px 12px;
 }
 
 .lyris-setting input[type="checkbox"] {
