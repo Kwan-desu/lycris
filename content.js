@@ -1704,6 +1704,17 @@
 
     wrapper.innerHTML = `
       <div class="lyris-scroll" id="lyris-scroll" tabindex="0" aria-label="Lyrics, scroll to browse">
+        <div id="lyris-quick-controls" role="toolbar" aria-label="Quick controls">
+          <button id="lyris-quick-translate" type="button" aria-pressed="false">Translate</button>
+          <div class="lyris-quick-separator" aria-hidden="true"></div>
+          <div class="lyris-quick-script-group" role="radiogroup" aria-label="Japanese script mode">
+            <button class="lyris-quick-script-btn" data-mode="furigana" type="button" role="radio" aria-checked="false">振</button>
+            <button class="lyris-quick-script-btn" data-mode="romaji" type="button" role="radio" aria-checked="false">Aa</button>
+            <button class="lyris-quick-script-btn" data-mode="hiragana" type="button" role="radio" aria-checked="false">あ</button>
+            <button class="lyris-quick-script-btn" data-mode="katakana" type="button" role="radio" aria-checked="false">ア</button>
+            <button class="lyris-quick-script-btn" data-mode="original" type="button" role="radio" aria-checked="false">原</button>
+          </div>
+        </div>
         <div class="lyris-list" id="lyris-list"></div>
       </div>
 
@@ -1746,6 +1757,40 @@
         scrollToActiveLine(true);
       });
     }
+
+    // Quick Controls pill bar listeners
+    const quickTranslate = wrapper.querySelector('#lyris-quick-translate');
+    if (quickTranslate) {
+      quickTranslate.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settings.translationEnabled = !settings.translationEnabled;
+        saveSetting('translationEnabled', settings.translationEnabled);
+        quickTranslate.classList.toggle('active', settings.translationEnabled);
+        quickTranslate.setAttribute('aria-pressed', String(settings.translationEnabled));
+        const panelCheckbox = document.querySelector('#lyris-opt-translation');
+        if (panelCheckbox) panelCheckbox.checked = settings.translationEnabled;
+        if (settings.translationEnabled) fetchTranslationForCurrentLyrics();
+        renderCurrentLyricsState();
+      });
+    }
+
+    wrapper.querySelectorAll('.lyris-quick-script-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mode = btn.dataset.mode;
+        settings.japaneseMode = mode;
+        saveSetting('japaneseMode', mode);
+        wrapper.querySelectorAll('.lyris-quick-script-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.mode === mode);
+          b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+        });
+        const panelSelect = document.querySelector('#lyris-opt-japanese-mode');
+        if (panelSelect) panelSelect.value = mode;
+        renderCurrentLyricsState();
+      });
+    });
+
+    updateQuickControlsUI();
 
     return wrapper;
   }
@@ -2417,6 +2462,23 @@
     if (fadeVal) fadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
 
     renderSourcesListUI();
+    updateQuickControlsUI();
+  }
+
+  function updateQuickControlsUI() {
+    const translateBtn = document.getElementById('lyris-quick-translate');
+    if (translateBtn) {
+      const isOn = Boolean(settings.translationEnabled);
+      translateBtn.classList.toggle('active', isOn);
+      translateBtn.setAttribute('aria-pressed', String(isOn));
+    }
+
+    const currentMode = settings.japaneseMode || 'furigana';
+    document.querySelectorAll('.lyris-quick-script-btn').forEach(btn => {
+      const match = btn.dataset.mode === currentMode;
+      btn.classList.toggle('active', match);
+      btn.setAttribute('aria-checked', String(match));
+    });
   }
 
   function renderSourcesListUI() {
@@ -2867,6 +2929,7 @@
 
     activeLineIndex = -1;
     updateActiveLine();
+    updateQuickControlsUI();
   }
 
   function renderStaticLyrics(plainText) {
