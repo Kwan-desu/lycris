@@ -698,7 +698,7 @@ async function fetchFromLrclib(title, artist, duration, isCoverSong = false) {
   const cleanA = cleanArtistName(artist || '');
   const primaryA = getPrimaryArtist(cleanA);
 
-  const userAgent = 'Lyris/1.0.0 (https://github.com/Kwan-desu/lycris)';
+  const userAgent = 'Lyris/1.1.0 (https://github.com/Kwan-desu/lycris)';
   const headers = { 'User-Agent': userAgent };
 
   let plainFallback = null;
@@ -1107,7 +1107,7 @@ async function handleSearchCandidates(query) {
   const q = query.trim();
   const candidates = [];
 
-  const userAgent = 'Lyris/1.0.0 (https://github.com/Kwan-desu/lycris)';
+  const userAgent = 'Lyris/1.1.0 (https://github.com/Kwan-desu/lycris)';
   const headers = { 'User-Agent': userAgent };
 
   // 1. Search LRCLIB

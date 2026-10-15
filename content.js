@@ -2098,7 +2098,7 @@
       <div class="lyris-settings-foot">
         <span class="lyris-status-dot"></span>
         <span id="lyris-settings-status">Ready</span>
-        <span class="lyris-version-label">v1.0.0</span>
+        <span class="lyris-version-label">v1.1.0</span>
       </div>
     `;
 

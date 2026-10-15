@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lyris — Lyrics in the light",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Synced lyrics with word-by-word karaoke, ambient light, and offline Japanese readings for YouTube Music.",
   "homepage_url": "https://github.com/Kwan-desu/lycris",
   "icons": {
