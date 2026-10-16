@@ -285,13 +285,6 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   display: none !important;
 }
 
-#lyris-lyrics-wrapper.has-backdrop-dimmer {
-  background: linear-gradient(180deg, rgba(10, 12, 14, 0.62) 0%, rgba(10, 12, 14, 0.82) 100%) !important;
-  backdrop-filter: blur(28px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(28px) saturate(140%) !important;
-  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.35);
-}
-
 .lyris-scroll,
 #am-lyrics-scroll-container {
   position: relative;
@@ -303,7 +296,7 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-  padding: 0 24px;
+  padding: 44px 24px 24px 24px;
   mask-image: linear-gradient(transparent, #000 16px, #000 calc(100% - 24px), transparent);
   -webkit-mask-image: linear-gradient(transparent, #000 16px, #000 calc(100% - 24px), transparent);
   scroll-behavior: smooth;
@@ -359,7 +352,6 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   transform-origin: left center;
   position: relative;
   user-select: text;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75), 0 2px 18px rgba(0, 0, 0, 0.5);
 }
 
 .lyris-line:hover,
@@ -381,7 +373,7 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   font-weight: 750;
   filter: none;
   transform: scale(1.018);
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.95);
+  text-shadow: 0 1px 18px rgba(255, 255, 255, 0.12);
 }
 
 .lyris-line.past,
@@ -444,10 +436,9 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   font-size: 16px;
   line-height: 1.45;
   font-weight: 400;
-  color: rgba(248, 246, 242, 0.78);
+  color: rgba(248, 246, 242, 0.65);
   margin-top: 4px;
   letter-spacing: 0;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
 }
 
 /* Japanese Ruby Tags */
@@ -460,9 +451,9 @@ ruby.am-ruby rt {
   font-size: 0.52em;
   font-weight: 500;
   line-height: 1;
-  color: rgba(248, 246, 242, 0.82);
+  color: rgba(248, 246, 242, 0.75);
   letter-spacing: 0;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  text-shadow: none;
 }
 
 /* Plain (Untimed) Lyrics */
@@ -529,6 +520,18 @@ ruby.am-ruby rt {
   font-family: var(--ly-font);
   font-size: 12px;
   user-select: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#lyris-lyrics-wrapper:hover #lyris-quick-controls,
+#lyris-quick-controls.is-expanded,
+#lyris-quick-controls:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 /* -- Compact trigger button ------------------------------------------------ */
@@ -538,12 +541,12 @@ ruby.am-ruby rt {
   align-items: center;
   gap: 5px;
   padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 16px;
-  background: rgba(18, 20, 23, 0.85);
+  background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   color: #f8f6f2;
   font-family: var(--ly-font);
   font-size: 11px;
@@ -556,7 +559,8 @@ ruby.am-ruby rt {
 }
 
 #lyris-quick-toggle-btn:hover {
-  background: rgba(30, 34, 38, 0.95);
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
   color: #fff;
 }
 
@@ -602,12 +606,12 @@ ruby.am-ruby rt {
   gap: 6px;
   padding: 5px 10px;
   margin-left: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
-  background: rgba(18, 20, 23, 0.85);
+  background: rgba(20, 23, 26, 0.65);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
   opacity: 0;
   transform: translateX(8px);
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -619,10 +623,9 @@ ruby.am-ruby rt {
   transform: translateX(0);
 }
 
-/* -- Translate & Dimmer toggle pills ---------------------------------------- */
+/* -- Translate toggle pill ------------------------------------------------- */
 
-#lyris-quick-translate,
-#lyris-quick-dimmer {
+#lyris-quick-translate {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -639,8 +642,7 @@ ruby.am-ruby rt {
   white-space: nowrap;
 }
 
-#lyris-quick-translate:hover,
-#lyris-quick-dimmer:hover {
+#lyris-quick-translate:hover {
   background: rgba(255, 255, 255, 0.16);
   color: #fff;
 }
@@ -651,14 +653,7 @@ ruby.am-ruby rt {
   box-shadow: 0 2px 8px rgba(212, 83, 78, 0.4);
 }
 
-#lyris-quick-dimmer.active {
-  background: rgba(255, 255, 255, 0.22);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-#lyris-quick-translate:focus-visible,
-#lyris-quick-dimmer:focus-visible {
+#lyris-quick-translate:focus-visible {
   outline: 2px solid var(--ly-signal);
   outline-offset: 2px;
 }

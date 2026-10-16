@@ -33,7 +33,6 @@ const DEFAULT_SETTINGS = {
   showOriginal: false,
   furiganaEnabled: true,
   translationEnabled: false,
-  backdropDimmer: true,
   fontSize: 40,
   clickToSeek: true,
   syncOffset: 0,
@@ -397,7 +396,6 @@ document.addEventListener('DOMContentLoaded', () => {
     settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
     settings.clickToSeek = DEFAULT_SETTINGS.clickToSeek;
     settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
-    settings.backdropDimmer = DEFAULT_SETTINGS.backdropDimmer;
     settings.syncOffset = DEFAULT_SETTINGS.syncOffset;
 
     chrome.storage.sync.set({
@@ -410,7 +408,6 @@ document.addEventListener('DOMContentLoaded', () => {
       wordHighlight: settings.wordHighlight,
       clickToSeek: settings.clickToSeek,
       translationEnabled: settings.translationEnabled,
-      backdropDimmer: settings.backdropDimmer,
       syncOffset: settings.syncOffset
     }, updateUI);
   });
