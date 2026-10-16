@@ -506,27 +506,111 @@ ruby.am-ruby rt {
 }
 
 /* ==========================================================================
-   4b. QUICK CONTROLS PILL BAR (STICKY TOP OF SCROLL)
+   4b. QUICK CONTROLS (TOP-RIGHT, COLLAPSED BY DEFAULT)
    ========================================================================== */
 
 #lyris-quick-controls {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  position: absolute;
+  top: 12px;
+  right: 20px;
+  z-index: 15;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 20px;
-  background: rgba(20, 23, 25, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  margin: 8px auto 4px;
-  width: fit-content;
+  gap: 0;
   font-family: var(--ly-font);
   font-size: 12px;
   user-select: none;
 }
+
+/* -- Compact trigger button ------------------------------------------------ */
+
+#lyris-quick-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: rgba(248, 246, 242, 0.7);
+  font-family: var(--ly-font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+  white-space: nowrap;
+  position: relative;
+  z-index: 2;
+}
+
+#lyris-quick-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+#lyris-quick-toggle-btn:focus-visible {
+  outline: 2px solid var(--ly-signal);
+  outline-offset: 2px;
+}
+
+#lyris-quick-toggle-btn .lyris-quick-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+#lyris-quick-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Translation-active indicator on trigger */
+#lyris-quick-toggle-btn.translate-active {
+  border-color: rgba(212, 83, 78, 0.5);
+}
+
+#lyris-quick-toggle-btn.translate-active::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ly-signal);
+  box-shadow: 0 0 6px rgba(212, 83, 78, 0.6);
+}
+
+/* -- Expandable drawer ----------------------------------------------------- */
+
+#lyris-quick-drawer {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  margin-left: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+#lyris-quick-controls.is-expanded #lyris-quick-drawer {
+  display: flex;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* -- Translate toggle pill ------------------------------------------------- */
 
 #lyris-quick-translate {
   display: inline-flex;
@@ -535,23 +619,25 @@ ruby.am-ruby rt {
   padding: 4px 10px;
   border: none;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--ly-muted);
+  background: transparent;
+  color: rgba(248, 246, 242, 0.7);
   font-family: var(--ly-font);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
 }
 
 #lyris-quick-translate:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 #lyris-quick-translate.active {
   background: var(--ly-signal);
   color: #fff;
+  box-shadow: 0 2px 8px rgba(212, 83, 78, 0.4);
 }
 
 #lyris-quick-translate:focus-visible {
@@ -559,12 +645,16 @@ ruby.am-ruby rt {
   outline-offset: 2px;
 }
 
+/* -- Separator ------------------------------------------------------------- */
+
 .lyris-quick-separator {
   width: 1px;
   height: 16px;
   background: rgba(255, 255, 255, 0.16);
   flex-shrink: 0;
 }
+
+/* -- Script mode radio group ----------------------------------------------- */
 
 .lyris-quick-script-group {
   display: flex;
@@ -580,22 +670,24 @@ ruby.am-ruby rt {
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: var(--ly-muted);
+  color: rgba(248, 246, 242, 0.7);
   font-family: var(--ly-font);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
 }
 
 .lyris-quick-script-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 .lyris-quick-script-btn.active {
   background: var(--ly-signal);
   color: #fff;
+  box-shadow: 0 2px 8px rgba(212, 83, 78, 0.4);
 }
 
 .lyris-quick-script-btn:focus-visible {
@@ -603,11 +695,21 @@ ruby.am-ruby rt {
   outline-offset: 2px;
 }
 
+/* -- Responsive ------------------------------------------------------------ */
+
 @media (max-width: 400px) {
   #lyris-quick-controls {
+    right: 8px;
+  }
+
+  #lyris-quick-toggle-btn {
+    padding: 4px 7px;
+    font-size: 10px;
+  }
+
+  #lyris-quick-drawer {
     gap: 4px;
     padding: 4px 8px;
-    font-size: 10px;
   }
 
   #lyris-quick-translate {

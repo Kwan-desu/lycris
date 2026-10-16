@@ -1703,8 +1703,12 @@
     wrapper.className = 'lyris-lyrics-wrapper';
 
     wrapper.innerHTML = `
-      <div class="lyris-scroll" id="lyris-scroll" tabindex="0" aria-label="Lyrics, scroll to browse">
-        <div id="lyris-quick-controls" role="toolbar" aria-label="Quick controls">
+      <div id="lyris-quick-controls" role="toolbar" aria-label="Quick controls">
+        <button id="lyris-quick-toggle-btn" type="button" aria-expanded="false" title="Quick controls">
+          <span class="lyris-quick-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+          <span id="lyris-quick-badge">振</span>
+        </button>
+        <div id="lyris-quick-drawer">
           <button id="lyris-quick-translate" type="button" aria-pressed="false">Translate</button>
           <div class="lyris-quick-separator" aria-hidden="true"></div>
           <div class="lyris-quick-script-group" role="radiogroup" aria-label="Japanese script mode">
@@ -1715,6 +1719,9 @@
             <button class="lyris-quick-script-btn" data-mode="original" type="button" role="radio" aria-checked="false">原</button>
           </div>
         </div>
+      </div>
+
+      <div class="lyris-scroll" id="lyris-scroll" tabindex="0" aria-label="Lyrics, scroll to browse">
         <div class="lyris-list" id="lyris-list"></div>
       </div>
 
@@ -1758,15 +1765,43 @@
       });
     }
 
-    // Quick Controls pill bar listeners
+    // Quick Controls: collapsed trigger + expandable drawer
+    const quickControls = wrapper.querySelector('#lyris-quick-controls');
+    const quickToggle = wrapper.querySelector('#lyris-quick-toggle-btn');
+    const quickDrawer = wrapper.querySelector('#lyris-quick-drawer');
     const quickTranslate = wrapper.querySelector('#lyris-quick-translate');
+
+    if (quickToggle && quickControls) {
+      quickToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const expanded = quickControls.classList.toggle('is-expanded');
+        quickToggle.setAttribute('aria-expanded', String(expanded));
+      });
+
+      // Close drawer on click outside
+      document.addEventListener('click', (e) => {
+        if (quickControls.classList.contains('is-expanded') && !quickControls.contains(e.target)) {
+          quickControls.classList.remove('is-expanded');
+          quickToggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+
+      // Close drawer on Escape
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && quickControls.classList.contains('is-expanded')) {
+          quickControls.classList.remove('is-expanded');
+          quickToggle.setAttribute('aria-expanded', 'false');
+          quickToggle.focus();
+        }
+      });
+    }
+
     if (quickTranslate) {
       quickTranslate.addEventListener('click', (e) => {
         e.stopPropagation();
         settings.translationEnabled = !settings.translationEnabled;
         saveSetting('translationEnabled', settings.translationEnabled);
-        quickTranslate.classList.toggle('active', settings.translationEnabled);
-        quickTranslate.setAttribute('aria-pressed', String(settings.translationEnabled));
+        updateQuickControlsUI();
         const panelCheckbox = document.querySelector('#lyris-opt-translation');
         if (panelCheckbox) panelCheckbox.checked = settings.translationEnabled;
         if (settings.translationEnabled) fetchTranslationForCurrentLyrics();
@@ -1780,10 +1815,7 @@
         const mode = btn.dataset.mode;
         settings.japaneseMode = mode;
         saveSetting('japaneseMode', mode);
-        wrapper.querySelectorAll('.lyris-quick-script-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.mode === mode);
-          b.setAttribute('aria-checked', String(b.dataset.mode === mode));
-        });
+        updateQuickControlsUI();
         const panelSelect = document.querySelector('#lyris-opt-japanese-mode');
         if (panelSelect) panelSelect.value = mode;
         renderCurrentLyricsState();
@@ -2466,14 +2498,26 @@
   }
 
   function updateQuickControlsUI() {
+    const badgeLabels = { furigana: '振', romaji: 'Aa', hiragana: 'あ', katakana: 'ア', original: '原' };
+    const currentMode = settings.japaneseMode || 'furigana';
+    const isTranslateOn = Boolean(settings.translationEnabled);
+
+    // Update trigger badge text
+    const badge = document.getElementById('lyris-quick-badge');
+    if (badge) badge.textContent = badgeLabels[currentMode] || '振';
+
+    // Update translate-active indicator on trigger
+    const toggleBtn = document.getElementById('lyris-quick-toggle-btn');
+    if (toggleBtn) toggleBtn.classList.toggle('translate-active', isTranslateOn);
+
+    // Update translate pill
     const translateBtn = document.getElementById('lyris-quick-translate');
     if (translateBtn) {
-      const isOn = Boolean(settings.translationEnabled);
-      translateBtn.classList.toggle('active', isOn);
-      translateBtn.setAttribute('aria-pressed', String(isOn));
+      translateBtn.classList.toggle('active', isTranslateOn);
+      translateBtn.setAttribute('aria-pressed', String(isTranslateOn));
     }
 
-    const currentMode = settings.japaneseMode || 'furigana';
+    // Update script radio buttons
     document.querySelectorAll('.lyris-quick-script-btn').forEach(btn => {
       const match = btn.dataset.mode === currentMode;
       btn.classList.toggle('active', match);
