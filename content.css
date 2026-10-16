@@ -285,6 +285,13 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   display: none !important;
 }
 
+#lyris-lyrics-wrapper.has-backdrop-dimmer {
+  background: linear-gradient(180deg, rgba(10, 12, 14, 0.62) 0%, rgba(10, 12, 14, 0.82) 100%) !important;
+  backdrop-filter: blur(28px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(140%) !important;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.35);
+}
+
 .lyris-scroll,
 #am-lyrics-scroll-container {
   position: relative;
@@ -352,6 +359,7 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   transform-origin: left center;
   position: relative;
   user-select: text;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75), 0 2px 18px rgba(0, 0, 0, 0.5);
 }
 
 .lyris-line:hover,
@@ -373,7 +381,7 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   font-weight: 750;
   filter: none;
   transform: scale(1.018);
-  text-shadow: 0 1px 18px rgba(255, 255, 255, 0.12);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.95);
 }
 
 .lyris-line.past,
@@ -436,9 +444,10 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   font-size: 16px;
   line-height: 1.45;
   font-weight: 400;
-  color: rgba(248, 246, 242, 0.65);
+  color: rgba(248, 246, 242, 0.78);
   margin-top: 4px;
   letter-spacing: 0;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
 }
 
 /* Japanese Ruby Tags */
@@ -451,9 +460,9 @@ ruby.am-ruby rt {
   font-size: 0.52em;
   font-weight: 500;
   line-height: 1;
-  color: rgba(248, 246, 242, 0.75);
+  color: rgba(248, 246, 242, 0.82);
   letter-spacing: 0;
-  text-shadow: none;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
 }
 
 /* Plain (Untimed) Lyrics */
@@ -529,13 +538,13 @@ ruby.am-ruby rt {
   align-items: center;
   gap: 5px;
   padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  color: rgba(248, 246, 242, 0.7);
+  background: rgba(18, 20, 23, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  color: #f8f6f2;
   font-family: var(--ly-font);
   font-size: 11px;
   font-weight: 600;
@@ -547,7 +556,7 @@ ruby.am-ruby rt {
 }
 
 #lyris-quick-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(30, 34, 38, 0.95);
   color: #fff;
 }
 
@@ -570,7 +579,7 @@ ruby.am-ruby rt {
 
 /* Translation-active indicator on trigger */
 #lyris-quick-toggle-btn.translate-active {
-  border-color: rgba(212, 83, 78, 0.5);
+  border-color: rgba(212, 83, 78, 0.7);
 }
 
 #lyris-quick-toggle-btn.translate-active::after {
@@ -582,7 +591,7 @@ ruby.am-ruby rt {
   height: 6px;
   border-radius: 50%;
   background: var(--ly-signal);
-  box-shadow: 0 0 6px rgba(212, 83, 78, 0.6);
+  box-shadow: 0 0 6px rgba(212, 83, 78, 0.8);
 }
 
 /* -- Expandable drawer ----------------------------------------------------- */
@@ -593,12 +602,12 @@ ruby.am-ruby rt {
   gap: 6px;
   padding: 5px 10px;
   margin-left: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  background: rgba(18, 20, 23, 0.85);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
   opacity: 0;
   transform: translateX(8px);
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -610,9 +619,10 @@ ruby.am-ruby rt {
   transform: translateX(0);
 }
 
-/* -- Translate toggle pill ------------------------------------------------- */
+/* -- Translate & Dimmer toggle pills ---------------------------------------- */
 
-#lyris-quick-translate {
+#lyris-quick-translate,
+#lyris-quick-dimmer {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -620,7 +630,7 @@ ruby.am-ruby rt {
   border: none;
   border-radius: 12px;
   background: transparent;
-  color: rgba(248, 246, 242, 0.7);
+  color: #e2dfda;
   font-family: var(--ly-font);
   font-size: 11px;
   font-weight: 600;
@@ -629,8 +639,9 @@ ruby.am-ruby rt {
   white-space: nowrap;
 }
 
-#lyris-quick-translate:hover {
-  background: rgba(255, 255, 255, 0.14);
+#lyris-quick-translate:hover,
+#lyris-quick-dimmer:hover {
+  background: rgba(255, 255, 255, 0.16);
   color: #fff;
 }
 
@@ -640,7 +651,14 @@ ruby.am-ruby rt {
   box-shadow: 0 2px 8px rgba(212, 83, 78, 0.4);
 }
 
-#lyris-quick-translate:focus-visible {
+#lyris-quick-dimmer.active {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+#lyris-quick-translate:focus-visible,
+#lyris-quick-dimmer:focus-visible {
   outline: 2px solid var(--ly-signal);
   outline-offset: 2px;
 }
@@ -650,7 +668,7 @@ ruby.am-ruby rt {
 .lyris-quick-separator {
   width: 1px;
   height: 16px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.2);
   flex-shrink: 0;
 }
 
@@ -670,7 +688,7 @@ ruby.am-ruby rt {
   border: none;
   border-radius: 10px;
   background: transparent;
-  color: rgba(248, 246, 242, 0.7);
+  color: #e2dfda;
   font-family: var(--ly-font);
   font-size: 11px;
   font-weight: 600;
@@ -680,7 +698,7 @@ ruby.am-ruby rt {
 }
 
 .lyris-quick-script-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.16);
   color: #fff;
 }
 

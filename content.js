@@ -34,9 +34,10 @@
     wordHighlight: true, // Syllable/word synchronized karaoke highlight to specific words
     highlightStyle: 'apple-glow', // 'apple-glow' | 'karaoke-wave' | 'gradient-wipe' | 'clean-fade'
     japaneseMode: 'furigana', // 'original' | 'furigana' | 'romaji' | 'hiragana' | 'katakana'
-    showOriginal: true, // Display original Japanese beneath readings
+    showOriginal: false, // Display original Japanese beneath readings
     furiganaEnabled: true, // Alias for backward compatibility
     translationEnabled: false, // Display English translation under Japanese lines
+    backdropDimmer: true, // Dark backdrop for text readability over bright ambient light
     fontSize: 40, // 40px default (Apple Music typography contract)
     clickToSeek: true,
     syncOffset: 0,
@@ -387,6 +388,7 @@
       } else {
         wrapper.style.removeProperty('display');
       }
+      wrapper.classList.toggle('has-backdrop-dimmer', settings.backdropDimmer !== false);
     }
 
     if (typeof ambientEngine !== 'undefined' && ambientEngine) {
@@ -1710,6 +1712,7 @@
         </button>
         <div id="lyris-quick-drawer">
           <button id="lyris-quick-translate" type="button" aria-pressed="false">Translate</button>
+          <button id="lyris-quick-dimmer" type="button" class="lyris-quick-pill-btn" aria-pressed="true" title="Toggle dark background for readability">Dim</button>
           <div class="lyris-quick-separator" aria-hidden="true"></div>
           <div class="lyris-quick-script-group" role="radiogroup" aria-label="Japanese script mode">
             <button class="lyris-quick-script-btn" data-mode="furigana" type="button" role="radio" aria-checked="false">振</button>
@@ -1806,6 +1809,19 @@
         if (panelCheckbox) panelCheckbox.checked = settings.translationEnabled;
         if (settings.translationEnabled) fetchTranslationForCurrentLyrics();
         renderCurrentLyricsState();
+      });
+    }
+
+    const quickDimmer = wrapper.querySelector('#lyris-quick-dimmer');
+    if (quickDimmer) {
+      quickDimmer.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settings.backdropDimmer = !(settings.backdropDimmer !== false);
+        saveSetting('backdropDimmer', settings.backdropDimmer);
+        applySettingsToDOM();
+        updateQuickControlsUI();
+        const panelCheckbox = document.querySelector('#lyris-opt-backdrop-dimmer');
+        if (panelCheckbox) panelCheckbox.checked = settings.backdropDimmer !== false;
       });
     }
 
@@ -2070,6 +2086,10 @@
             <input type="checkbox" id="lyris-opt-word-karaoke">
           </label>
           <label class="lyris-setting">
+            <span>Background dimming (readability)</span>
+            <input type="checkbox" id="lyris-opt-backdrop-dimmer">
+          </label>
+          <label class="lyris-setting">
             <span>Click lyric to seek</span>
             <input type="checkbox" id="lyris-opt-click-seek">
           </label>
@@ -2242,6 +2262,16 @@
       });
     }
 
+    const backdropDimmer = panel.querySelector('#lyris-opt-backdrop-dimmer');
+    if (backdropDimmer) {
+      backdropDimmer.addEventListener('change', () => {
+        settings.backdropDimmer = backdropDimmer.checked;
+        saveSetting('backdropDimmer', settings.backdropDimmer);
+        applySettingsToDOM();
+        updateQuickControlsUI();
+      });
+    }
+
     // Reset Lyrics
     const resetLyricsBtn = panel.querySelector('#lyris-reset-lyrics-btn');
     if (resetLyricsBtn) {
@@ -2251,6 +2281,7 @@
         settings.japaneseMode = DEFAULT_SETTINGS.japaneseMode;
         settings.showOriginal = DEFAULT_SETTINGS.showOriginal;
         settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
+        settings.backdropDimmer = DEFAULT_SETTINGS.backdropDimmer;
         settings.fontSize = DEFAULT_SETTINGS.fontSize;
         settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
         settings.clickToSeek = DEFAULT_SETTINGS.clickToSeek;
@@ -2261,6 +2292,7 @@
           japaneseMode: DEFAULT_SETTINGS.japaneseMode,
           showOriginal: DEFAULT_SETTINGS.showOriginal,
           translationEnabled: DEFAULT_SETTINGS.translationEnabled,
+          backdropDimmer: DEFAULT_SETTINGS.backdropDimmer,
           fontSize: DEFAULT_SETTINGS.fontSize,
           wordHighlight: DEFAULT_SETTINGS.wordHighlight,
           clickToSeek: DEFAULT_SETTINGS.clickToSeek
@@ -2443,7 +2475,7 @@
     if (jMode) jMode.value = settings.japaneseMode || 'furigana';
 
     const showOrig = panel.querySelector('#lyris-opt-show-original');
-    if (showOrig) showOrig.checked = settings.showOriginal !== false;
+    if (showOrig) showOrig.checked = settings.showOriginal === true;
 
     const transOpt = panel.querySelector('#lyris-opt-translation');
     if (transOpt) transOpt.checked = Boolean(settings.translationEnabled);
@@ -2459,6 +2491,9 @@
 
     const cs = panel.querySelector('#lyris-opt-click-seek');
     if (cs) cs.checked = settings.clickToSeek !== false;
+
+    const dimOpt = panel.querySelector('#lyris-opt-backdrop-dimmer');
+    if (dimOpt) dimOpt.checked = settings.backdropDimmer !== false;
 
     const amb = panel.querySelector('#lyris-opt-ambient-enabled');
     if (amb) amb.checked = (settings.ambientEnabled ?? settings.ambientLighting) !== false;
@@ -2515,6 +2550,14 @@
     if (translateBtn) {
       translateBtn.classList.toggle('active', isTranslateOn);
       translateBtn.setAttribute('aria-pressed', String(isTranslateOn));
+    }
+
+    // Update dimmer pill
+    const dimmerBtn = document.getElementById('lyris-quick-dimmer');
+    if (dimmerBtn) {
+      const isDimmerOn = settings.backdropDimmer !== false;
+      dimmerBtn.classList.toggle('active', isDimmerOn);
+      dimmerBtn.setAttribute('aria-pressed', String(isDimmerOn));
     }
 
     // Update script radio buttons
@@ -2841,7 +2884,7 @@
       lineElem.appendChild(primaryContainer);
 
       // Dual-line Japanese reading layout: show original beneath reading if enabled
-      if (settings.showOriginal !== false && mode !== 'original' && containsJapanese(line.text)) {
+      if (settings.showOriginal === true && mode !== 'original' && mode !== 'furigana' && containsJapanese(line.text)) {
         const origElem = document.createElement('div');
         origElem.className = 'lyris-original-line';
         origElem.textContent = line.text;
@@ -2996,7 +3039,7 @@
       primary.innerHTML = (converted && typeof converted === 'object' && 'text' in converted) ? converted.text : (converted || '');
       lineElem.appendChild(primary);
 
-      if (settings.showOriginal !== false && mode !== 'original' && containsJapanese(trimmed)) {
+      if (settings.showOriginal === true && mode !== 'original' && mode !== 'furigana' && containsJapanese(trimmed)) {
         const origElem = document.createElement('div');
         origElem.className = 'lyris-original-line';
         origElem.textContent = trimmed;
