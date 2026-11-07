@@ -422,12 +422,54 @@
     return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text);
   }
 
+  function renderFuriganaHtml(text, reading) {
+    if (!containsKanji(text)) return text;
+    if (/^[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+$/.test(text)) {
+      return `<ruby class="am-ruby"><rb>${text}</rb><rt>${reading}</rt></ruby>`;
+    }
+    let res = "";
+    let tIdx = 0;
+    let rIdx = 0;
+    while (tIdx < text.length) {
+      if (!/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text[tIdx])) {
+        res += text[tIdx];
+        if (rIdx < reading.length && reading[rIdx] === text[tIdx]) {
+          rIdx++;
+        }
+        tIdx++;
+        continue;
+      }
+      let kanjiStart = tIdx;
+      while (tIdx < text.length && /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text[tIdx])) {
+        tIdx++;
+      }
+      let kanjiBlock = text.slice(kanjiStart, tIdx);
+      if (tIdx < text.length) {
+        let nextKana = text[tIdx];
+        let kanaPos = reading.indexOf(nextKana, rIdx);
+        if (kanaPos !== -1) {
+          let kanjiReading = reading.slice(rIdx, kanaPos);
+          res += `<ruby class="am-ruby"><rb>${kanjiBlock}</rb><rt>${kanjiReading}</rt></ruby>`;
+          rIdx = kanaPos;
+        } else {
+          res += kanjiBlock;
+        }
+      } else {
+        let kanjiReading = reading.slice(rIdx);
+        res += `<ruby class="am-ruby"><rb>${kanjiBlock}</rb><rt>${kanjiReading}</rt></ruby>`;
+        rIdx = reading.length;
+      }
+    }
+    return res;
+  }
+
   function addFurigana(text) {
-    if (!text) return '';
+    if (!text) return "";
     if (!containsKanji(text)) return escapeHTML(text);
 
-    const compounds = (typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) || {};
-    const singles = (typeof window !== 'undefined' && window.AM_KANJI_SINGLE) || {};
+    const compounds = (typeof window !== "undefined" && window.AM_KANJI_COMPOUNDS) || {};
+    const singles = (typeof window !== "undefined" && window.AM_KANJI_SINGLE) || {};
+    const onyomi = (typeof window !== "undefined" && window.AM_KANJI_ONYOMI) || {};
 
     let safe = escapeHTML(text);
     const regex = getCompoundRegex();
@@ -439,104 +481,121 @@
         const reading = compounds[match];
         if (!reading) return match;
         const id = markers.length;
-        markers.push(`<ruby class="am-ruby"><rb>${match}</rb><rt>${reading}</rt></ruby>`);
+        markers.push(renderFuriganaHtml(match, reading));
         return `\uE000${id}\uE001`;
       });
     }
 
-    // Replace single Kanji characters
-    safe = safe.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, (ch) => {
-      const reading = singles[ch];
-      if (reading) {
-        return `<ruby class="am-ruby"><rb>${ch}</rb><rt>${reading}</rt></ruby>`;
+    // Replace single & consecutive Kanji characters with context-aware On'yomi / Kun'yomi
+    safe = safe.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block) => {
+      if (block.length > 1) {
+        return block.split("").map(ch => {
+          const reading = onyomi[ch] || singles[ch];
+          if (reading) return `<ruby class="am-ruby"><rb>${ch}</rb><rt>${reading}</rt></ruby>`;
+          return ch;
+        }).join("");
+      } else {
+        const reading = singles[block] || onyomi[block];
+        if (reading) return `<ruby class="am-ruby"><rb>${block}</rb><rt>${reading}</rt></ruby>`;
+        return block;
       }
-      return ch;
     });
 
     // Restore compound markers
     if (markers.length > 0) {
-      safe = safe.replace(/\uE000(\d+)\uE001/g, (_, id) => markers[parseInt(id, 10)] || '');
+      safe = safe.replace(/\uE000(\d+)\uE001/g, (_, id) => markers[parseInt(id, 10)] || "");
     }
 
     return safe;
   }
 
   const ROMAJI_MAP = {
-    'あ': 'a', 'い': 'i', 'う': 'u', 'え': 'e', 'お': 'o',
-    'か': 'ka', 'き': 'ki', 'く': 'ku', 'け': 'ke', 'こ': 'ko',
-    'さ': 'sa', 'し': 'shi', 'す': 'su', 'せ': 'se', 'そ': 'so',
-    'た': 'ta', 'ち': 'chi', 'つ': 'tsu', 'て': 'te', 'と': 'to',
-    'な': 'na', 'に': 'ni', 'ぬ': 'nu', 'ね': 'ne', 'の': 'no',
-    'は': 'ha', 'ひ': 'hi', 'ふ': 'fu', 'へ': 'he', 'ほ': 'ho',
-    'ま': 'ma', 'み': 'mi', 'む': 'mu', 'め': 'me', 'も': 'mo',
-    'や': 'ya', 'ゆ': 'yu', 'よ': 'yo',
-    'ら': 'ra', 'り': 'ri', 'る': 'ru', 'れ': 're', 'ろ': 'ro',
-    'わ': 'wa', 'ゐ': 'wi', 'ゑ': 'we', 'を': 'wo', 'ん': 'n',
-    'が': 'ga', 'ぎ': 'gi', 'ぐ': 'gu', 'げ': 'ge', 'ご': 'go',
-    'ざ': 'za', 'じ': 'ji', 'ず': 'zu', 'ぜ': 'ze', 'ぞ': 'zo',
-    'だ': 'da', 'ぢ': 'ji', 'づ': 'zu', 'で': 'de', 'ど': 'do',
-    'ば': 'ba', 'び': 'bi', 'ぶ': 'bu', 'べ': 'be', 'ぼ': 'bo',
-    'ぱ': 'pa', 'ぴ': 'pi', 'ぷ': 'pu', 'ぺ': 'pe', 'ぽ': 'po',
-    'きゃ': 'kya', 'きゅ': 'kyu', 'きょ': 'kyo',
-    'しゃ': 'sha', 'しゅ': 'shu', 'しょ': 'sho',
-    'ちゃ': 'cha', 'ちゅ': 'chu', 'ちょ': 'cho',
-    'にゃ': 'nya', 'にゅ': 'nyu', 'にょ': 'nyo',
-    'ひゃ': 'hya', 'ひゅ': 'hyu', 'ひょ': 'hyo',
-    'みゃ': 'mya', 'みゅ': 'myu', 'みょ': 'myo',
-    'りゃ': 'rya', 'りゅ': 'ryu', 'りょ': 'ryo',
-    'ぎゃ': 'gya', 'ぎゅ': 'gyu', 'ぎょ': 'gyo',
-    'じゃ': 'ja', 'じゅ': 'ju', 'じょ': 'jo',
-    'びゃ': 'bya', 'びゅ': 'byu', 'びょ': 'byo',
-    'ぴゃ': 'pya', 'ぴゅ': 'pyu', 'ぴょ': 'pyo',
-    'ふぁ': 'fa', 'ふぃ': 'fi', 'ふぇ': 'fe', 'ふぉ': 'fo',
-    'ゔ': 'vu'
+    "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+    "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+    "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+    "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+    "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+    "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+    "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+    "や": "ya", "ゆ": "yu", "よ": "yo",
+    "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+    "わ": "wa", "ゐ": "wi", "ゑ": "we", "を": "wo", "ん": "n",
+    "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+    "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+    "だ": "da", "ぢ": "ji", "づ": "zu", "で": "de", "ど": "do",
+    "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+    "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+    "きゃ": "kya", "きゅ": "kyu", "きょ": "kyo",
+    "しゃ": "sha", "しゅ": "shu", "しょ": "sho",
+    "ちゃ": "cha", "ちゅ": "chu", "ちょ": "cho",
+    "にゃ": "nya", "にゅ": "nyu", "にょ": "nyo",
+    "ひゃ": "hya", "ひゅ": "hyu", "ひょ": "hyo",
+    "みゃ": "mya", "みゅ": "myu", "みょ": "myo",
+    "りゃ": "rya", "りゅ": "ryu", "りょ": "ryo",
+    "ぎゃ": "gya", "ぎゅ": "gyu", "ぎょ": "gyo",
+    "じゃ": "ja", "じゅ": "ju", "じょ": "jo",
+    "びゃ": "bya", "びゅ": "byu", "びょ": "byo",
+    "ぴゃ": "pya", "ぴゅ": "pyu", "ぴょ": "pyo",
+    "ふぁ": "fa", "ふぃ": "fi", "ふぇ": "fe", "ふぉ": "fo",
+    "てぃ": "ti", "でぃ": "di", "とぅ": "tu", "どぅ": "du",
+    "しぇ": "she", "じぇ": "je", "ちぇ": "che",
+    "つぁ": "tsa", "つぃ": "tsi", "つぇ": "tse", "つぉ": "tso",
+    "うぃ": "wi", "うぇ": "we", "うぉ": "wo",
+    "ゔぁ": "va", "ゔぃ": "vi", "ゔ": "vu", "ゔぇ": "ve", "ゔぉ": "vo"
   };
 
   function katakanaToHiragana(str) {
-    if (!str) return '';
+    if (!str) return "";
     return str.replace(/[\u30a1-\u30f6]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
   }
 
   function hiraganaToKatakana(str) {
-    if (!str) return '';
+    if (!str) return "";
     return str.replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
   }
 
   function textToHiragana(text) {
-    if (!text) return '';
-    const compounds = (typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) || {};
-    const singles = (typeof window !== 'undefined' && window.AM_KANJI_SINGLE) || {};
+    if (!text) return "";
+    const compounds = (typeof window !== "undefined" && window.AM_KANJI_COMPOUNDS) || {};
+    const singles = (typeof window !== "undefined" && window.AM_KANJI_SINGLE) || {};
+    const onyomi = (typeof window !== "undefined" && window.AM_KANJI_ONYOMI) || {};
     let res = text;
     const regex = getCompoundRegex();
     if (regex) {
       res = res.replace(regex, m => compounds[m] || m);
     }
-    res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g, ch => singles[ch] || ch);
+    res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block) => {
+      if (block.length > 1) {
+        return block.split("").map(ch => onyomi[ch] || singles[ch] || ch).join("");
+      } else {
+        return singles[block] || onyomi[block] || block;
+      }
+    });
     return katakanaToHiragana(res);
   }
 
   function kanaToRomaji(kana) {
-    if (!kana) return '';
+    if (!kana) return "";
     const hira = katakanaToHiragana(kana);
-    let out = '';
+    let out = "";
     let i = 0;
     while (i < hira.length) {
-      if (hira[i] === 'っ' || hira[i] === 'ッ') {
+      if (hira[i] === "っ" || hira[i] === "ッ") {
         const next2 = hira.slice(i + 1, i + 3);
         const next1 = hira.slice(i + 1, i + 2);
         const r = ROMAJI_MAP[next2] || ROMAJI_MAP[next1];
         if (r) {
-          out += r[0];
+          out += (r.startsWith("ch") ? "t" : r[0]);
         }
         i++;
         continue;
       }
-      if (hira[i] === 'ー') {
+      if (hira[i] === "ー") {
         const lastChar = out.slice(-1);
         if (/[aeiou]/i.test(lastChar)) {
           out += lastChar;
         } else {
-          out += '-';
+          out += "-";
         }
         i++;
         continue;
@@ -2759,23 +2818,18 @@
     return result;
   }
 
+  const TOKENIZE_REGEX = /([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]|[\p{L}\p{N}']+|\s+|[^\s\p{L}\p{N}]+)/gu;
+
   function tokenizeLineText(text) {
     if (!text) return [];
-    const regexCmp = getCompoundRegex();
-    let regex;
-    if (regexCmp && containsJapanese(text)) {
-      regex = new RegExp(`(${regexCmp.source}|[\\u4e00-\\u9fa5\\u3040-\\u309f\\u30a0-\\u30ff\\uac00-\\ud7af]|[\\p{L}\\p{N}']+|\\s+|[^\\s\\p{L}\\p{N}]+)`, 'gu');
-    } else {
-      regex = /([\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]|[\p{L}\p{N}']+|\s+|[^\s\p{L}\p{N}]+)/gu;
-    }
+    TOKENIZE_REGEX.lastIndex = 0;
     const tokens = [];
     let match;
-    while ((match = regex.exec(text)) !== null) {
+    while ((match = TOKENIZE_REGEX.exec(text)) !== null) {
       if (match[0]) tokens.push(match[0]);
     }
     return tokens.length > 0 ? tokens : [text];
   }
-
   function computeWordTimings(line, nextLine) {
     const textToSing = line.text || '♪';
     const tokens = tokenizeLineText(textToSing);

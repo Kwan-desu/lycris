@@ -72,6 +72,48 @@ test('convertJapaneseLine supports every script mode and escapes HTML', () => {
   assert.equal(api.convertJapaneseLine('a & b', 'romaji'), 'a &amp; b');
 });
 
+test('Japanese kanji readings and furigana alignment use accurate dictionary readings', () => {
+  const cases = [
+    ['学校', 'がっこう', 'gakkou'],
+    ['会社', 'かいしゃ', 'kaisha'],
+    ['運命', 'うんめい', 'unmei'],
+    ['時間', 'じかん', 'jikan'],
+    ['先生', 'せんせい', 'sensei'],
+    ['今日', 'きょう', 'kyou'],
+    ['明日', 'あした', 'ashita'],
+    ['昨日', 'きのう', 'kinou'],
+    ['一緒', 'いっしょ', 'issho'],
+    ['一緒に', 'いっしょに', 'isshoni'],
+    ['日本', 'にほん', 'nihon'],
+    ['映画', 'えいが', 'eiga'],
+    ['電話', 'でんわ', 'denwa'],
+    ['電車', 'でんしゃ', 'densha'],
+    ['時計', 'とけい', 'tokei'],
+    ['人生', 'じんせい', 'jinsei'],
+    ['感覚', 'かんかく', 'kankaku'],
+    ['手を繋ぐ', 'てをつなぐ', 'tewotsunagu'],
+    ['生きていく', 'いきていく', 'ikiteiku'],
+    ['生まれて', 'うまれて', 'umarete'],
+    ['月明かり', 'つきあかり', 'tsukiakari']
+  ];
+
+  for (const [kanji, expectedHira, expectedRomaji] of cases) {
+    const hira = api.convertJapaneseLine(kanji, 'hiragana');
+    const roma = api.convertJapaneseLine(kanji, 'romaji');
+    assert.equal(hira, expectedHira, `Mismatch hira for ${kanji}`);
+    assert.equal(roma, expectedRomaji, `Mismatch romaji for ${kanji}`);
+  }
+
+  assert.equal(
+    api.convertJapaneseLine('月明かり', 'furigana'),
+    '<ruby class="am-ruby"><rb>月明</rb><rt>つきあ</rt></ruby>かり'
+  );
+  assert.equal(
+    api.convertJapaneseLine('走り出す', 'furigana'),
+    '<ruby class="am-ruby"><rb>走</rb><rt>はし</rt></ruby>り<ruby class="am-ruby"><rb>出</rb><rt>だ</rt></ruby>す'
+  );
+});
+
 test('addFurigana never injects unescaped markup from lyric text', () => {
   const out = api.addFurigana('<img src=x onerror=alert(1)>空');
   assert.ok(!out.includes('<img'), out);
