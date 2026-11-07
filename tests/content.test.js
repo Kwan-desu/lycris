@@ -14,12 +14,16 @@ test('parseLRC parses, sorts, expands multi-timestamps and applies [offset]', ()
     '[00:05.00]second',
     '[00:01.50][00:10.00]repeat',
     '',
-    '[01:02.123]long'
+    '[01:02.123]long',
+    '[1:15.50]<01:15.50>single digit minute',
+    '[02:00,50]comma decimal'
   ].join('\n');
   const lines = api.parseLRC(lrc);
-  assert.deepEqual(plain(lines.map(l => l.text)), ['repeat', 'second', 'repeat', 'long']);
+  assert.deepEqual(plain(lines.map(l => l.text)), ['repeat', 'second', 'repeat', 'long', 'single digit minute', 'comma decimal']);
   assert.equal(lines[0].time, 2.0);          // 1.5 + 0.5 offset
   assert.equal(lines[3].time, 62.623);       // 62.123 + 0.5
+  assert.equal(lines[4].time, 76.0);         // 75.5 + 0.5
+  assert.equal(lines[5].time, 121.0);        // 120.5 + 0.5
   assert.deepEqual(plain(api.parseLRC('')), []);
 });
 

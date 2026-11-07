@@ -257,11 +257,22 @@
     }
   }
 
+  function getMediaElement() {
+    return document.querySelector('#movie_player video.html5-main-video') ||
+           document.querySelector('video.html5-main-video') ||
+           document.querySelector('#movie_player video') ||
+           document.querySelector('ytmusic-player video') ||
+           document.querySelector('video') ||
+           document.querySelector('audio');
+  }
+
   function getEffectiveOffset() {
     if (currentTrackKey && settings.trackOffsets && typeof settings.trackOffsets[currentTrackKey] === 'number') {
-      return settings.trackOffsets[currentTrackKey];
+      const trackOff = settings.trackOffsets[currentTrackKey];
+      if (!isNaN(trackOff) && isFinite(trackOff)) return trackOff;
     }
-    return settings.syncOffset || 0;
+    const val = Number(settings.syncOffset);
+    return (!isNaN(val) && isFinite(val)) ? val : 0;
   }
 
   function adjustTrackOffset(deltaMs) {
@@ -729,7 +740,7 @@
                                songImage.naturalHeight > 0;
 
       // 2. Check HTML5 Video (Video Mode / Music Video)
-      const video = document.querySelector('video');
+      const video = getMediaElement();
       const isVideoReady = video &&
                            video.readyState >= 2 &&
                            video.videoWidth > 0 &&
@@ -979,7 +990,7 @@
         }
         // Fallback: try video if valid
         if (!drawn) {
-          const v = document.querySelector('video');
+          const v = getMediaElement();
           if (v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
             try {
               this.bufferCtx.drawImage(v, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
@@ -1253,7 +1264,7 @@
       if (imgElem) artwork = imgElem.src;
     }
 
-    const video = document.querySelector('video');
+    const video = getMediaElement();
     if (video && !isNaN(video.duration) && video.duration > 0) {
       duration = Math.round(video.duration);
     }
@@ -1543,7 +1554,12 @@
     if (!list || !list.children.length) {
       renderCurrentLyricsState();
     }
-    scrollToActiveLine(true);
+    resumeAutoScroll();
+    requestAnimationFrame(() => {
+      updateLyricsPaneGeometry();
+      updateActiveLine();
+      scrollToActiveLine(false);
+    });
   }
 
   function deactivateCustomLyricsTab() {
@@ -1740,9 +1756,7 @@
 
     if (scrollContainer && resumeBtn) {
       const onUserBrowse = () => {
-        if (!currentLyrics.isSynced) return;
-        userScrolled = true;
-        updateResumeSyncButton();
+        markUserScrolled();
       };
 
       scrollContainer.addEventListener('wheel', onUserBrowse, { passive: true });
@@ -1758,10 +1772,7 @@
 
       resumeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        userScrolled = false;
-        resumeBtn.hidden = true;
-        resumeBtn.classList.remove('visible');
-        scrollToActiveLine(true);
+        resumeAutoScroll();
       });
     }
 
@@ -1827,9 +1838,34 @@
     return wrapper;
   }
 
-  function handleManualScroll() {
+  function markUserScrolled() {
+    if (!currentLyrics.isSynced) return;
     userScrolled = true;
     updateResumeSyncButton();
+
+    // Auto-resume sync follow after 7 seconds of inactivity (matching Apple Music / Spotify)
+    clearTimeout(userScrollTimeout);
+    userScrollTimeout = setTimeout(() => {
+      resumeAutoScroll();
+    }, 7000);
+  }
+
+  function resumeAutoScroll() {
+    clearTimeout(userScrollTimeout);
+    userScrollTimeout = null;
+    userScrolled = false;
+    const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
+    if (resumeBtn) {
+      resumeBtn.hidden = true;
+      resumeBtn.classList.remove('visible');
+    }
+    if (activeLineIndex >= 0) {
+      scrollToActiveLine(true);
+    }
+  }
+
+  function handleManualScroll() {
+    markUserScrolled();
   }
 
   function updateHeaderUI() {
@@ -1864,13 +1900,25 @@
     }
     const containerRect = scrollContainer.getBoundingClientRect();
     const elemRect = activeElem.getBoundingClientRect();
+    if (!containerRect.height || !elemRect.height) {
+      return;
+    }
     const relativeY = (elemRect.top + elemRect.height / 2) - containerRect.top;
     const followY = Math.min(120, Math.max(80, scrollContainer.clientHeight * 0.24));
     const isAway = Math.abs(relativeY - followY) > 35;
 
-    if (userScrolled && isAway) {
-      resumeBtn.hidden = false;
-      resumeBtn.classList.add('visible');
+    if (userScrolled) {
+      if (isAway) {
+        resumeBtn.hidden = false;
+        resumeBtn.classList.add('visible');
+      } else {
+        // User naturally scrolled back near the active line: clear manual scroll state
+        resumeBtn.hidden = true;
+        resumeBtn.classList.remove('visible');
+        userScrolled = false;
+        clearTimeout(userScrollTimeout);
+        userScrollTimeout = null;
+      }
     } else {
       resumeBtn.hidden = true;
       resumeBtn.classList.remove('visible');
@@ -2676,7 +2724,7 @@
     if (!lrcText) return [];
     const lines = lrcText.split('\n');
     const result = [];
-    const timeRegex = /\[(\d{2,}):(\d{2}(?:\.\d{1,3})?)\]/g;
+    const timeRegex = /\[(\d{1,3}):(\d{2}(?:[.,]\d{1,3})?)\]/g;
     let headerOffsetSec = 0;
 
     for (let rawLine of lines) {
@@ -2694,17 +2742,25 @@
 
       let match;
       const timestamps = [];
+      timeRegex.lastIndex = 0;
       while ((match = timeRegex.exec(rawLine)) !== null) {
         const min = parseInt(match[1], 10);
-        const sec = parseFloat(match[2]);
-        timestamps.push(min * 60 + sec);
+        const sec = parseFloat(match[2].replace(',', '.'));
+        if (!isNaN(min) && !isNaN(sec)) {
+          timestamps.push(min * 60 + sec);
+        }
       }
 
-      const text = rawLine.replace(/\[\d{2,}:\d{2}(?:\.\d{1,3})?\]/g, '').trim();
+      const text = rawLine
+        .replace(/\[\d{1,3}:\d{2}(?:[.,]\d{1,3})?\]/g, '')
+        .replace(/<\d{1,3}:\d{2}(?:[.,]\d{1,3})?>/g, '')
+        .trim();
 
       for (let time of timestamps) {
         const adjustedTime = Math.max(0, time + headerOffsetSec);
-        result.push({ time: adjustedTime, text });
+        if (!isNaN(adjustedTime) && isFinite(adjustedTime)) {
+          result.push({ time: adjustedTime, text });
+        }
       }
     }
 
@@ -2869,7 +2925,7 @@
         }
       });
       lineElem.addEventListener('click', (e) => {
-        const video = document.querySelector('video');
+        const video = getMediaElement();
         if (!video) return;
 
         // Quick Calibration: Alt+Click or Shift+Click aligns lyric line to current playback
@@ -2887,12 +2943,7 @@
 
         const eff = getEffectiveOffset();
         video.currentTime = Math.max(0, line.time - (eff / 1000));
-        userScrolled = false;
-        const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
-        if (resumeBtn) {
-          resumeBtn.hidden = true;
-          resumeBtn.classList.remove('visible');
-        }
+        resumeAutoScroll();
         setActiveLine(index, true);
       });
 
@@ -3052,24 +3103,28 @@
   }
 
   function updateActiveLine() {
-    if (!currentLyrics.isSynced || currentLyrics.lines.length === 0) return;
+    if (!currentLyrics.isSynced || !Array.isArray(currentLyrics.lines) || currentLyrics.lines.length === 0) return;
 
-    const video = document.querySelector('video');
-    if (!video) return;
+    const video = getMediaElement();
+    if (!video || typeof video.currentTime !== 'number' || isNaN(video.currentTime)) return;
 
     const currentTime = video.currentTime + (getEffectiveOffset() / 1000);
+    if (isNaN(currentTime) || !isFinite(currentTime)) return;
 
     let newIndex = -1;
     for (let i = 0; i < currentLyrics.lines.length; i++) {
-      if (currentLyrics.lines[i].time <= currentTime) {
+      const lineTime = currentLyrics.lines[i].time;
+      if (typeof lineTime === 'number' && !isNaN(lineTime) && lineTime <= currentTime) {
         newIndex = i;
-      } else {
+      } else if (typeof lineTime === 'number' && lineTime > currentTime) {
         break;
       }
     }
 
     if (newIndex !== activeLineIndex) {
       setActiveLine(newIndex, true);
+    } else if (userScrolled) {
+      updateResumeSyncButton();
     }
 
     if (activeLineIndex >= 0 && settings.lineHighlight !== false && settings.wordHighlight !== false) {
@@ -3143,6 +3198,7 @@
     if (shouldScroll && !userScrolled && activeLineIndex >= 0) {
       scrollToActiveLine(true);
     }
+    updateResumeSyncButton();
   }
 
   function scrollToActiveLine(smooth = true) {
@@ -3157,9 +3213,13 @@
     // followY = clamp(scrollContainer.clientHeight * 0.24, 80px, 120px)
     const containerRect = scrollContainer.getBoundingClientRect();
     const elemRect = activeElem.getBoundingClientRect();
+    if (!containerRect.height || !elemRect.height) return;
+
     const relativeTop = (elemRect.top + elemRect.height / 2) - containerRect.top;
     const followY = Math.min(120, Math.max(80, scrollContainer.clientHeight * 0.24));
     const targetScroll = Math.round(scrollContainer.scrollTop + relativeTop - followY);
+
+    if (isNaN(targetScroll) || !isFinite(targetScroll)) return;
 
     scrollContainer.scrollTo({
       top: Math.max(0, targetScroll),
@@ -3183,7 +3243,7 @@
   }
 
   function tryGetCaptionsLyrics() {
-    const video = document.querySelector('video');
+    const video = getMediaElement();
     if (video && video.textTracks && video.textTracks.length > 0) {
       const tracks = Array.from(video.textTracks);
       // Prioritize active or showing tracks
@@ -3199,7 +3259,7 @@
           for (let j = 0; j < track.cues.length; j++) {
             const cue = track.cues[j];
             const text = (cue.text || '').replace(/<[^>]+>/g, '').trim();
-            if (text) {
+            if (text && typeof cue.startTime === 'number' && !isNaN(cue.startTime) && isFinite(cue.startTime)) {
               lines.push({
                 time: cue.startTime,
                 text: text
@@ -3258,7 +3318,7 @@
       durationRetryCount = 0;
     }
 
-    const video = document.querySelector('video');
+    const video = getMediaElement();
     if (video && (isNaN(video.duration) || video.duration === 0)) {
       if (durationRetryCount < 6) {
         durationRetryCount++;
@@ -3379,16 +3439,19 @@
 
         // 1. Confident Synced Lyrics from Online Provider
         if (response && response.success && response.lyrics && response.synced) {
-          isLoadingLyrics = false;
-          currentLyrics = {
-            isSynced: true,
-            lines: parseLRC(response.lyrics),
-            plainText: '',
-            source: response.source || 'Synced'
-          };
-          lyricsCache.set(trackKey, currentLyrics);
-          renderCurrentLyricsState();
-          return;
+          const parsedLines = parseLRC(response.lyrics);
+          if (parsedLines && parsedLines.length > 0) {
+            isLoadingLyrics = false;
+            currentLyrics = {
+              isSynced: true,
+              lines: parsedLines,
+              plainText: '',
+              source: response.source || 'Synced'
+            };
+            lyricsCache.set(trackKey, currentLyrics);
+            renderCurrentLyricsState();
+            return;
+          }
         }
 
         // Online plain text candidate (if available)
@@ -3435,7 +3498,7 @@
         }
 
         // If cues are still being parsed by browser video element, retry once after short delay
-        const video = document.querySelector('video');
+        const video = getMediaElement();
         if (video && video.textTracks && video.textTracks.length > 0) {
           setTimeout(() => {
             if (requestId !== currentFetchRequestId) return;
@@ -3485,35 +3548,42 @@
   // APP LIFECYCLE & WATCHERS
   // ==========================================================================
 
+  let lastRafTimestamp = 0;
   function timeSyncLoop() {
-    const video = document.querySelector('video');
-    if (video && !video.paused) {
-      if (Math.abs(video.currentTime - lastObservedTime) > 0.05) {
-        lastObservedTime = video.currentTime;
-        updateActiveLine();
+    lastRafTimestamp = Date.now();
+    try {
+      const video = getMediaElement();
+      if (video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime)) {
+        if (Math.abs(video.currentTime - lastObservedTime) > 0.02) {
+          lastObservedTime = video.currentTime;
+          updateActiveLine();
+        }
       }
+    } catch (err) {
+      console.warn('[Lyris] timeSyncLoop error:', err);
+    } finally {
+      requestAnimationFrame(timeSyncLoop);
     }
-    requestAnimationFrame(timeSyncLoop);
   }
 
   let lastBoundVideo = null;
   function bindVideoEvents() {
-    const video = document.querySelector('video');
+    const video = getMediaElement();
     if (video && video !== lastBoundVideo) {
       lastBoundVideo = video;
       video.addEventListener('seeking', () => updateActiveLine());
       video.addEventListener('seeked', () => {
-        userScrolled = false;
-        const resumeBtn = document.getElementById('lyris-resume-btn') || document.getElementById('am-resume-scroll-btn');
-        if (resumeBtn) {
-          resumeBtn.hidden = true;
-          resumeBtn.classList.remove('visible');
-        }
+        resumeAutoScroll();
         updateActiveLine();
-        scrollToActiveLine(true);
       });
       video.addEventListener('play', () => {
         ambientEngine.injectContainers();
+        updateActiveLine();
+      });
+      video.addEventListener('playing', () => {
+        updateActiveLine();
+      });
+      video.addEventListener('timeupdate', () => {
         updateActiveLine();
       });
     }
@@ -3599,11 +3669,27 @@
       updateLyricsPaneGeometry();
     }, { passive: true });
 
-    // 3. Main 500ms consistency watcher
+    // 3. Tab visibility watcher: re-align sync immediately when user returns to YouTube Music
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        lastObservedTime = -1;
+        updateActiveLine();
+        if (!userScrolled) {
+          scrollToActiveLine(true);
+        }
+      }
+    });
+
+    // 4. Main 500ms consistency watcher
     setInterval(() => {
       forceEnableNativeLyricsTab();
       hideNativeLyricsUnavailableMessage();
       bindVideoEvents();
+
+      // Watchdog: re-arm rAF loop if stalled or suspended by browser background tab throttling
+      if (Date.now() - lastRafTimestamp > 3000) {
+        requestAnimationFrame(timeSyncLoop);
+      }
 
       const isSelected = isLyricsTabSelected();
       const wrapper = document.getElementById('lyris-lyrics-wrapper') || document.getElementById('am-lyrics-wrapper');
@@ -3618,6 +3704,9 @@
         const list = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
         if (!list || !list.children.length) {
           renderCurrentLyricsState();
+        }
+        if (currentLyrics.isSynced) {
+          updateActiveLine();
         }
       } else {
         if (wrapper && (!wrapper.hidden || wrapper.style.display !== 'none')) {
