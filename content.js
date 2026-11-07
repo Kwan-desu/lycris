@@ -42,7 +42,7 @@
     syncOffset: 0,
     trackOffsets: {}, // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
     waveformEnabled: true, // Audio waveform visualizer above player bar
-    waveformStyle: 'waves' // 'waves' | 'bars' | 'pulse'
+    waveformStyle: 'ribbon' // 'ribbon' (Siri Fluid Ribbon) | 'nodes' (Harmonic Nodes)
   };
 
   const HIGHLIGHT_STYLES = [
@@ -1178,8 +1178,6 @@
       this.animId = null;
       this.currentAmplitude = 0;
       this.phase = 0;
-      this.barsCount = 64;
-      this.barHeights = new Float32Array(this.barsCount);
       this.lastFrameTime = 0;
       this.isRunning = false;
     }
@@ -1219,7 +1217,7 @@
       if (!this.canvas) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const w = window.innerWidth || 1200;
-      const h = 56;
+      const h = 64;
       this.canvas.width = Math.round(w * dpr);
       this.canvas.height = Math.round(h * dpr);
       if (this.ctx) {
@@ -1258,7 +1256,7 @@
         this.animId = null;
       }
       if (this.ctx && this.canvas) {
-        this.ctx.clearRect(0, 0, window.innerWidth || 1200, 56);
+        this.ctx.clearRect(0, 0, window.innerWidth || 1200, 64);
       }
     }
 
@@ -1284,17 +1282,18 @@
 
       const video = getMediaElement();
       const isPlaying = video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime);
+      const playbackRate = (video && typeof video.playbackRate === 'number' && video.playbackRate > 0) ? video.playbackRate : 1.0;
       const currentTime = isPlaying ? video.currentTime : 0;
 
-      // Vocal surge: when lyric line is singing, swell the waveform dynamically
+      // Vocal surge: swell waveform amplitude during active lyric singing
       const hasActiveVocal = isPlaying && activeLineIndex >= 0 && currentLyrics.isSynced;
-      const baseAmp = isPlaying ? (hasActiveVocal ? 0.90 : 0.65) : 0.08;
+      const targetAmp = isPlaying ? (hasActiveVocal ? 1.0 : 0.72) : 0.04;
 
-      this.currentAmplitude += (baseAmp - this.currentAmplitude) * Math.min(1, delta * 5.5);
-      this.phase += (isPlaying ? 2.8 : 0.6) * delta;
+      this.currentAmplitude += (targetAmp - this.currentAmplitude) * Math.min(1, delta * 5.5);
+      this.phase += (isPlaying ? 2.2 * playbackRate : 0.35) * delta;
 
       const w = window.innerWidth || 1200;
-      const h = 56;
+      const h = 64;
       const ctx = this.ctx;
       ctx.clearRect(0, 0, w, h);
 
@@ -1302,136 +1301,220 @@
         ? ambientEngine.getSampledColors()
         : getTrackColorPalette(getCurrentTrackInfo());
 
-      const c1 = colors.primary || 'rgb(212, 83, 78)';
-      const c2 = colors.secondary || 'rgb(255, 117, 140)';
+      const c1Rgb = (colors && colors.primaryRgb) || [255, 140, 0];
+      const c2Rgb = (colors && colors.secondaryRgb) || [255, 195, 0];
 
-      const style = settings.waveformStyle || 'waves';
-      if (style === 'bars') {
-        this.drawSpectrumBars(ctx, w, h, c1, c2, currentTime, isPlaying, delta);
-      } else if (style === 'pulse') {
-        this.drawPulseLine(ctx, w, h, c1, c2, currentTime, isPlaying);
+      const isNodes = (settings.waveformStyle === 'nodes');
+      if (isNodes) {
+        this.drawHarmonicNodes(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying);
       } else {
-        this.drawFluidWaves(ctx, w, h, c1, c2, currentTime, isPlaying);
+        this.drawFluidRibbon(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying);
       }
     }
 
-    drawFluidWaves(ctx, w, h, c1, c2, currentTime, isPlaying) {
-      const grad = ctx.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, c1);
-      grad.addColorStop(0.5, c2);
-      grad.addColorStop(1, c1);
+    /**
+     * Production-ready Apple Siri Fluid Ribbon Visualizer.
+     * Generates 3 silky harmonic fluid layers with Gaussian taper and additive screen blending.
+     */
+    drawFluidRibbon(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying) {
+      const yMid = h / 2;
+      const maxAmp = 22; // Maximum peak displacement in pixels
+      const amp = this.currentAmplitude * maxAmp;
 
-      const amp = this.currentAmplitude * 28;
-
-      // Layer 1: Back harmonic wave (22% opacity)
-      this.renderWaveCurve(ctx, w, h, grad, 0.22, 0.005, this.phase * 0.75, amp * 0.7, 0);
-
-      // Layer 2: Mid harmonic wave (45% opacity)
-      this.renderWaveCurve(ctx, w, h, grad, 0.45, 0.008, this.phase * 1.25 + 1.2, amp * 0.85, 0);
-
-      // Layer 3: Foreground wave with glowing crest (85% opacity)
-      this.renderWaveCurve(ctx, w, h, grad, 0.85, 0.012, this.phase * 1.75 + 2.5, amp, 1);
-    }
-
-    renderWaveCurve(ctx, w, h, fillGrad, opacity, freq, phase, amp, strokeLevel) {
+      // 1. Subtle luminous baseline connecting across the full screen
+      const baseAlpha = isPlaying ? 0.22 : 0.12;
       ctx.save();
-      ctx.globalAlpha = opacity;
       ctx.beginPath();
-      ctx.moveTo(0, h);
-
-      const step = 6;
-      for (let x = 0; x <= w + step; x += step) {
-        const sin1 = Math.sin(x * freq + phase);
-        const cos1 = Math.cos(x * freq * 0.6 + phase * 0.8);
-        const y = h - (sin1 * amp) - (cos1 * (amp * 0.35));
-        ctx.lineTo(x, Math.max(2, Math.min(h, y)));
-      }
-
-      ctx.lineTo(w, h);
-      ctx.closePath();
-      ctx.fillStyle = fillGrad;
-      ctx.fill();
-
-      if (strokeLevel > 0) {
-        ctx.shadowColor = fillGrad;
-        ctx.shadowBlur = 10;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
+      ctx.moveTo(0, yMid);
+      ctx.lineTo(w, yMid);
+      ctx.strokeStyle = `rgba(${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}, ${baseAlpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
       ctx.restore();
-    }
 
-    drawSpectrumBars(ctx, w, h, c1, c2, currentTime, isPlaying, delta) {
-      const count = this.barsCount;
-      const gap = 3;
-      const barW = Math.max(2, (w - (count - 1) * gap) / count);
+      if (amp < 0.2) return;
 
-      const grad = ctx.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, c1);
-      grad.addColorStop(0.5, c2);
-      grad.addColorStop(1, c1);
-
+      // 2. Multi-layered fluid ribbon rendering with 'screen' composition
       ctx.save();
-      ctx.fillStyle = grad;
-      ctx.shadowColor = c1;
-      ctx.shadowBlur = 8;
+      ctx.globalCompositeOperation = 'screen';
 
-      for (let i = 0; i < count; i++) {
-        let targetH = 3;
-        if (isPlaying) {
-          const h1 = Math.sin(i * 0.18 + this.phase * 2.2);
-          const h2 = Math.cos(i * 0.32 + currentTime * 3.8);
-          const h3 = Math.sin((count - i) * 0.14 + this.phase * 1.4);
-          const combined = Math.abs(h1 * 0.45 + h2 * 0.35 + h3 * 0.20);
-          targetH = Math.max(3, combined * this.currentAmplitude * 44);
+      const layers = [
+        {
+          // Layer 0: Deep harmonic base ribbon
+          rgb: c2Rgb,
+          fillAlpha: 0.26,
+          strokeAlpha: 0.72,
+          glowAlpha: 0.50,
+          freq1: 0.0035,
+          freq2: 0.0070,
+          phaseOffset: this.phase * 0.75,
+          ampScale: 0.75,
+          upperSkew: 1.0,
+          lowerSkew: 0.85
+        },
+        {
+          // Layer 1: Central singing ribbon (primary vocal resonance)
+          rgb: c1Rgb,
+          fillAlpha: 0.36,
+          strokeAlpha: 0.90,
+          glowAlpha: 0.75,
+          freq1: 0.0050,
+          freq2: 0.0100,
+          phaseOffset: this.phase * 1.15 + 1.2,
+          ampScale: 1.00,
+          upperSkew: 1.05,
+          lowerSkew: 0.95
+        },
+        {
+          // Layer 2: Fast counter-harmonic ribbon (golden/bright accent)
+          rgb: [
+            Math.min(255, Math.round((c1Rgb[0] + c2Rgb[0]) * 0.5 + 20)),
+            Math.min(255, Math.round((c1Rgb[1] + c2Rgb[1]) * 0.5 + 20)),
+            Math.min(255, Math.round((c1Rgb[2] + c2Rgb[2]) * 0.5 + 10))
+          ],
+          fillAlpha: 0.22,
+          strokeAlpha: 0.68,
+          glowAlpha: 0.45,
+          freq1: 0.0068,
+          freq2: 0.0135,
+          phaseOffset: this.phase * 1.45 + 2.8,
+          ampScale: 0.82,
+          upperSkew: 0.92,
+          lowerSkew: 1.10
         }
+      ];
 
-        this.barHeights[i] += (targetH - this.barHeights[i]) * Math.min(1, delta * 14);
-        const barH = Math.max(3, Math.min(h - 4, this.barHeights[i]));
-        const x = i * (barW + gap);
-        const y = h - barH;
+      const step = 4;
+      const numSteps = Math.ceil(w / step);
+
+      for (let l = 0; l < layers.length; l++) {
+        const layer = layers[l];
+        const rgbStr = `${layer.rgb[0]}, ${layer.rgb[1]}, ${layer.rgb[2]}`;
+        const p1 = layer.phaseOffset;
+        const p2 = layer.phaseOffset * 0.82 + 0.5;
+        const lAmp = amp * layer.ampScale;
 
         ctx.beginPath();
-        const radius = Math.min(barW / 2, 4);
-        if (ctx.roundRect) {
-          ctx.roundRect(x, y, barW, barH, [radius, radius, 0, 0]);
-        } else {
-          ctx.rect(x, y, barW, barH);
+        ctx.moveTo(0, yMid);
+
+        // Upper boundary curve (left to right)
+        for (let i = 0; i <= numSteps; i++) {
+          const x = Math.min(w, i * step);
+          const u = x / w;
+          // Smooth Hann taper with Gaussian core: zero at edges, full blooming at center
+          const dist = Math.abs(2 * u - 1);
+          const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
+          const s1 = Math.sin(x * layer.freq1 + p1);
+          const c1 = Math.cos(x * layer.freq2 - p2);
+          const disp = (s1 * 0.75 + c1 * 0.25) * lAmp * layer.upperSkew * env;
+          ctx.lineTo(x, yMid - disp);
         }
+
+        // Lower boundary curve (right to left)
+        for (let i = numSteps; i >= 0; i--) {
+          const x = Math.min(w, i * step);
+          const u = x / w;
+          const dist = Math.abs(2 * u - 1);
+          const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
+          const s1 = Math.sin(x * layer.freq1 * 0.95 + p1 + 0.45);
+          const c1 = Math.cos(x * layer.freq2 * 0.92 - p2 + 0.35);
+          const disp = (s1 * 0.70 + c1 * 0.30) * lAmp * layer.lowerSkew * env;
+          ctx.lineTo(x, yMid + disp);
+        }
+
+        ctx.closePath();
+
+        // Translucent fluid body fill
+        ctx.fillStyle = `rgba(${rgbStr}, ${layer.fillAlpha})`;
         ctx.fill();
+
+        // Glowing ribbon boundary stroke
+        ctx.shadowColor = `rgba(${rgbStr}, ${layer.glowAlpha})`;
+        ctx.shadowBlur = 10;
+        ctx.strokeStyle = `rgba(${rgbStr}, ${layer.strokeAlpha})`;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
       }
+
       ctx.restore();
     }
 
-    drawPulseLine(ctx, w, h, c1, c2, currentTime, isPlaying) {
-      const grad = ctx.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, c1);
-      grad.addColorStop(0.5, c2);
-      grad.addColorStop(1, c1);
+    /**
+     * Resonant Harmonic Nodes Visualizer (Image 2 design).
+     * Symmetrical counter-phase strands intersecting at harmonic nodal points.
+     */
+    drawHarmonicNodes(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying) {
+      const yMid = h / 2;
+      const maxAmp = 22;
+      const amp = this.currentAmplitude * maxAmp;
+
+      // 1. Luminous center baseline
+      const baseAlpha = isPlaying ? 0.22 : 0.12;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(0, yMid);
+      ctx.lineTo(w, yMid);
+      ctx.strokeStyle = `rgba(${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}, ${baseAlpha})`;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+
+      if (amp < 0.2) return;
 
       ctx.save();
-      ctx.shadowColor = c1;
-      ctx.shadowBlur = 14;
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.globalCompositeOperation = 'screen';
 
+      const step = 4;
+      const numSteps = Math.ceil(w / step);
+      const freq = 0.0062;
+      const p = this.phase * 0.95;
+
+      const rgb1 = `${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}`;
+      const rgb2 = `${c2Rgb[0]}, ${c2Rgb[1]}, ${c2Rgb[2]}`;
+
+      // Build closed path between upper & lower counter-phase waves
       ctx.beginPath();
-      const centerY = h - 14;
-      const amp = this.currentAmplitude * 20;
+      ctx.moveTo(0, yMid);
 
-      ctx.moveTo(0, centerY);
-      const step = 8;
-      for (let x = 0; x <= w + step; x += step) {
-        const normX = x / w;
-        const envelope = Math.sin(normX * Math.PI);
-        const osc = Math.sin(x * 0.02 + this.phase * 2.5) * Math.cos(x * 0.008 + currentTime * 3.0);
-        const y = centerY - (osc * amp * envelope);
+      // Upper curve
+      for (let i = 0; i <= numSteps; i++) {
+        const x = Math.min(w, i * step);
+        const u = x / w;
+        const dist = Math.abs(2 * u - 1);
+        const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
+        const s = Math.sin(x * freq + p) + 0.12 * Math.sin(x * freq * 3.0 + p * 1.5);
+        const y = yMid - (s * amp * env);
         ctx.lineTo(x, y);
       }
+
+      // Lower curve (counter-phase return)
+      for (let i = numSteps; i >= 0; i--) {
+        const x = Math.min(w, i * step);
+        const u = x / w;
+        const dist = Math.abs(2 * u - 1);
+        const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
+        const s = Math.sin(x * freq + p) + 0.12 * Math.sin(x * freq * 3.0 + p * 1.5);
+        const y = yMid + (s * amp * env);
+        ctx.lineTo(x, y);
+      }
+
+      ctx.closePath();
+
+      // Vertical gradient body fill
+      const grad = ctx.createLinearGradient(0, yMid - amp, 0, yMid + amp);
+      grad.addColorStop(0, `rgba(${rgb1}, 0.35)`);
+      grad.addColorStop(0.5, `rgba(${rgb2}, 0.12)`);
+      grad.addColorStop(1, `rgba(${rgb1}, 0.35)`);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Glowing border lines
+      ctx.shadowColor = `rgba(${rgb1}, 0.85)`;
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = `rgba(${rgb1}, 0.92)`;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
+
       ctx.restore();
     }
   }
@@ -2554,9 +2637,8 @@
           <label class="lyris-setting">
             <span>Waveform style</span>
             <select id="lyris-opt-waveform-style">
-              <option value="waves">Fluid waves (glow)</option>
-              <option value="bars">Spectrum bars (EQ)</option>
-              <option value="pulse">Pulse line</option>
+              <option value="ribbon">Siri Fluid Ribbon</option>
+              <option value="nodes">Harmonic Nodes</option>
             </select>
           </label>
           <button class="lyris-text-action" id="lyris-reset-light-btn">Reset light settings</button>
@@ -2963,7 +3045,7 @@
     if (waveOpt) waveOpt.checked = settings.waveformEnabled !== false;
 
     const waveStyleOpt = panel.querySelector('#lyris-opt-waveform-style');
-    if (waveStyleOpt) waveStyleOpt.value = settings.waveformStyle || 'waves';
+    if (waveStyleOpt) waveStyleOpt.value = (settings.waveformStyle === 'nodes') ? 'nodes' : 'ribbon';
 
     renderSourcesListUI();
     updateQuickControlsUI();

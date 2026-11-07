@@ -97,7 +97,7 @@ test('defaults match the documented Apple typography contract and QQ is opt-in',
 
 test('waveform visualizer defaults and track color palette fallback', () => {
   assert.equal(api.DEFAULT_SETTINGS.waveformEnabled, true);
-  assert.equal(api.DEFAULT_SETTINGS.waveformStyle, 'waves');
+  assert.equal(api.DEFAULT_SETTINGS.waveformStyle, 'ribbon');
 
   const palette = api.getTrackColorPalette({ title: 'Song', artist: 'Artist' });
   assert.ok(palette.primary && palette.primary.startsWith('hsl('));

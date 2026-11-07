@@ -1466,7 +1466,7 @@ ruby.am-ruby rt {
 }
 
 /* ==========================================================================
-   11. AUDIO WAVEFORM VISUALIZER
+   11. AUDIO WAVEFORM VISUALIZER (Siri / Apple Fluid Ribbon)
    ========================================================================== */
 #lyris-waveform-container {
   position: fixed;
@@ -1474,11 +1474,11 @@ ruby.am-ruby rt {
   right: 0;
   bottom: 72px;
   width: 100vw;
-  height: 56px;
+  height: 64px;
   pointer-events: none;
   z-index: 12;
   overflow: hidden;
-  opacity: 0.88;
+  opacity: 0.95;
   transition: opacity 0.3s ease;
 }
 

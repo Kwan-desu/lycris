@@ -38,7 +38,7 @@ const DEFAULT_SETTINGS = {
   syncOffset: 0,
   trackOffsets: {},
   waveformEnabled: true,
-  waveformStyle: 'waves'
+  waveformStyle: 'ribbon'
 };
 
 const PROVIDER_LABELS = {
@@ -192,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
       waveformEnabledToggle.checked = settings.waveformEnabled !== false;
     }
     if (waveformStyleSelect) {
-      waveformStyleSelect.value = settings.waveformStyle || 'waves';
+      waveformStyleSelect.value = (settings.waveformStyle === 'nodes') ? 'nodes' : 'ribbon';
     }
 
     renderProviders();
