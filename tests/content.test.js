@@ -94,3 +94,17 @@ test('defaults match the documented Apple typography contract and QQ is opt-in',
     ['kugou', 'lrclib', 'native', 'netease', 'qq', 'youtube-cc']
   );
 });
+
+test('waveform visualizer defaults and track color palette fallback', () => {
+  assert.equal(api.DEFAULT_SETTINGS.waveformEnabled, true);
+  assert.equal(api.DEFAULT_SETTINGS.waveformStyle, 'waves');
+
+  const palette = api.getTrackColorPalette({ title: 'Song', artist: 'Artist' });
+  assert.ok(palette.primary && palette.primary.startsWith('hsl('));
+  assert.ok(palette.secondary && palette.secondary.startsWith('hsl('));
+  assert.ok(Array.isArray(palette.primaryRgb) && palette.primaryRgb.length === 3);
+  assert.ok(Array.isArray(palette.secondaryRgb) && palette.secondaryRgb.length === 3);
+
+  const [r, g, b] = api.hslToRgb(0, 1, 0.5);
+  assert.deepEqual([r, g, b], [255, 0, 0]);
+});

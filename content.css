@@ -1453,10 +1453,42 @@ ruby.am-ruby rt {
   .lyris-line,
   .lyris-word,
   .lyris-scroll,
-  .lyris-resume {
+  .lyris-resume,
+  #lyris-waveform-container {
     transition: none !important;
     animation: none !important;
     transform: none !important;
     scroll-behavior: auto !important;
   }
+  #lyris-waveform-container {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   11. AUDIO WAVEFORM VISUALIZER
+   ========================================================================== */
+#lyris-waveform-container {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 72px;
+  width: 100vw;
+  height: 56px;
+  pointer-events: none;
+  z-index: 12;
+  overflow: hidden;
+  opacity: 0.88;
+  transition: opacity 0.3s ease;
+}
+
+#lyris-waveform-container.is-hidden {
+  display: none !important;
+}
+
+#lyris-waveform-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
 }

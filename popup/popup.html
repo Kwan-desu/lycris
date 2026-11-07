@@ -194,6 +194,29 @@
             <input type="range" id="ambientSaturation" min="50" max="200" step="5" value="120">
           </div>
 
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Audio Waveform</span>
+              <small>Bottom visualizer synced with music color</small>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="waveformEnabled" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">
+              <span>Waveform Style</span>
+              <small>Dynamic visualizer pattern</small>
+            </div>
+            <select id="waveformStyle" class="select-input">
+              <option value="waves">Fluid Glow Waves</option>
+              <option value="bars">Spectrum Bars</option>
+              <option value="pulse">Pulse Line</option>
+            </select>
+          </div>
+
           <p class="settings-note">One color field behind the artwork and the lyrics. Keep text clear over every cover.</p>
           <button class="btn-text-action" id="btn-reset-ambient">Reset light settings</button>
         </div>

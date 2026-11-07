@@ -36,7 +36,9 @@ const DEFAULT_SETTINGS = {
   fontSize: 40,
   clickToSeek: true,
   syncOffset: 0,
-  trackOffsets: {}
+  trackOffsets: {},
+  waveformEnabled: true,
+  waveformStyle: 'waves'
 };
 
 const PROVIDER_LABELS = {
@@ -96,6 +98,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const ambientFadeVal = document.getElementById('ambientFadeVal');
   const ambientSaturationSlider = document.getElementById('ambientSaturation');
   const ambientSaturationVal = document.getElementById('ambientSaturationVal');
+  const waveformEnabledToggle = document.getElementById('waveformEnabled');
+  const waveformStyleSelect = document.getElementById('waveformStyle');
 
   // UI Elements - Providers
   const providerListContainer = document.getElementById('provider-list');
@@ -183,6 +187,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const sat = (typeof settings.ambientSaturation === 'number') ? settings.ambientSaturation : 120;
     ambientSaturationSlider.value = sat;
     ambientSaturationVal.textContent = `${sat}%`;
+
+    if (waveformEnabledToggle) {
+      waveformEnabledToggle.checked = settings.waveformEnabled !== false;
+    }
+    if (waveformStyleSelect) {
+      waveformStyleSelect.value = settings.waveformStyle || 'waves';
+    }
 
     renderProviders();
   }
@@ -385,6 +396,18 @@ document.addEventListener('DOMContentLoaded', () => {
     save('ambientSaturation', val, 0);
   });
 
+  if (waveformEnabledToggle) {
+    waveformEnabledToggle.addEventListener('change', () => {
+      save('waveformEnabled', waveformEnabledToggle.checked);
+    });
+  }
+
+  if (waveformStyleSelect) {
+    waveformStyleSelect.addEventListener('change', () => {
+      save('waveformStyle', waveformStyleSelect.value);
+    });
+  }
+
   // Section Resets
   btnResetLyrics.addEventListener('click', () => {
     settings.lyricsEnabled = DEFAULT_SETTINGS.lyricsEnabled;
@@ -419,6 +442,8 @@ document.addEventListener('DOMContentLoaded', () => {
     settings.ambientSpread = DEFAULT_SETTINGS.ambientSpread;
     settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
     settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
+    settings.waveformEnabled = DEFAULT_SETTINGS.waveformEnabled;
+    settings.waveformStyle = DEFAULT_SETTINGS.waveformStyle;
 
     chrome.storage.sync.set({
       ambientEnabled: settings.ambientEnabled,
@@ -426,7 +451,9 @@ document.addEventListener('DOMContentLoaded', () => {
       ambientBlur: settings.ambientBlur,
       ambientSpread: settings.ambientSpread,
       ambientFadeDuration: settings.ambientFadeDuration,
-      ambientSaturation: settings.ambientSaturation
+      ambientSaturation: settings.ambientSaturation,
+      waveformEnabled: settings.waveformEnabled,
+      waveformStyle: settings.waveformStyle
     }, updateUI);
   });
 

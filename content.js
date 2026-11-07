@@ -40,7 +40,9 @@
     fontSize: 40, // 40px default (Apple Music typography contract)
     clickToSeek: true,
     syncOffset: 0,
-    trackOffsets: {} // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
+    trackOffsets: {}, // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
+    waveformEnabled: true, // Audio waveform visualizer above player bar
+    waveformStyle: 'waves' // 'waves' | 'bars' | 'pulse'
   };
 
   const HIGHLIGHT_STYLES = [
@@ -1053,9 +1055,389 @@
       settings.ambientFadeDuration = parseFloat(val);
       applySettingsToDOM();
     }
+
+    getSampledColors() {
+      if (this.currentPalette && this.currentPaletteKey === this.lastDrawnKey) {
+        return this.currentPalette;
+      }
+
+      let primary = null;
+      let secondary = null;
+
+      try {
+        if (this.bufferCanvas && this.bufferCtx && this.bufferCanvas.width > 0 && this.bufferCanvas.height > 0) {
+          const w = this.bufferCanvas.width;
+          const h = this.bufferCanvas.height;
+          const stepX = Math.max(1, Math.floor(w / 14));
+          const stepY = Math.max(1, Math.floor(h / 14));
+          const imgData = this.bufferCtx.getImageData(0, 0, w, h).data;
+          const scored = [];
+
+          for (let y = stepY; y < h - stepY; y += stepY) {
+            for (let x = stepX; x < w - stepX; x += stepX) {
+              const idx = (y * w + x) * 4;
+              const r = imgData[idx];
+              const g = imgData[idx + 1];
+              const b = imgData[idx + 2];
+              const max = Math.max(r, g, b);
+              const min = Math.min(r, g, b);
+              const sat = max === 0 ? 0 : (max - min) / max;
+              const lum = (max + min) / 510;
+
+              if (lum > 0.12 && lum < 0.88 && sat > 0.15) {
+                const score = sat * (1 - Math.abs(lum - 0.5) * 0.8);
+                scored.push({ r, g, b, sat, lum, score });
+              }
+            }
+          }
+
+          scored.sort((a, b) => b.score - a.score);
+          if (scored.length > 0) {
+            primary = [scored[0].r, scored[0].g, scored[0].b];
+            const sec = scored.find(p => {
+              const diff = Math.abs(p.r - primary[0]) + Math.abs(p.g - primary[1]) + Math.abs(p.b - primary[2]);
+              return diff > 75;
+            });
+            if (sec) {
+              secondary = [sec.r, sec.g, sec.b];
+            } else {
+              secondary = [
+                Math.min(255, Math.max(0, primary[1] + 30)),
+                Math.min(255, Math.max(0, primary[2] + 40)),
+                Math.min(255, Math.max(0, primary[0] + 50))
+              ];
+            }
+          }
+        }
+      } catch (e) {
+        // Tainted canvas by cross-origin video is expected; fallback gracefully
+      }
+
+      if (!primary) {
+        const track = (typeof getCurrentTrackInfo === 'function') ? getCurrentTrackInfo() : null;
+        const fallback = getTrackColorPalette(track);
+        this.currentPalette = fallback;
+        this.currentPaletteKey = this.lastDrawnKey;
+        return this.currentPalette;
+      }
+
+      this.currentPalette = {
+        primary: `rgb(${primary[0]}, ${primary[1]}, ${primary[2]})`,
+        secondary: `rgb(${secondary[0]}, ${secondary[1]}, ${secondary[2]})`,
+        primaryRgb: primary,
+        secondaryRgb: secondary
+      };
+      this.currentPaletteKey = this.lastDrawnKey;
+      return this.currentPalette;
+    }
+  }
+
+  function hslToRgb(h, s, l) {
+    h = (h % 360 + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+  }
+
+  function getTrackColorPalette(trackInfo) {
+    const title = (trackInfo && (trackInfo.cleanTitle || trackInfo.title)) || 'song';
+    const artist = (trackInfo && (trackInfo.cleanArtist || trackInfo.artist)) || 'artist';
+    const str = `${title}__${artist}`.toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    const hue1 = Math.abs(hash) % 360;
+    const hue2 = (hue1 + 45 + (Math.abs(hash >> 4) % 60)) % 360;
+    return {
+      primary: `hsl(${hue1}, 85%, 58%)`,
+      secondary: `hsl(${hue2}, 90%, 65%)`,
+      primaryRgb: hslToRgb(hue1, 0.85, 0.58),
+      secondaryRgb: hslToRgb(hue2, 0.90, 0.65)
+    };
+  }
+
+  // ==========================================================================
+  // AUDIO WAVEFORM VISUALIZER (SYNCED WITH AMBIENT MUSIC PALETTE)
+  // ==========================================================================
+
+  class WaveformVisualizerEngine {
+    constructor() {
+      this.container = null;
+      this.canvas = null;
+      this.ctx = null;
+      this.animId = null;
+      this.currentAmplitude = 0;
+      this.phase = 0;
+      this.barsCount = 64;
+      this.barHeights = new Float32Array(this.barsCount);
+      this.lastFrameTime = 0;
+      this.isRunning = false;
+    }
+
+    init() {
+      this.inject();
+      if (settings.waveformEnabled !== false) {
+        this.start();
+      }
+    }
+
+    inject() {
+      if (document.getElementById('lyris-waveform-container')) return;
+
+      const container = document.createElement('div');
+      container.id = 'lyris-waveform-container';
+      container.className = 'lyris-waveform';
+      if (settings.waveformEnabled === false) {
+        container.classList.add('is-hidden');
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.id = 'lyris-waveform-canvas';
+
+      container.appendChild(canvas);
+      document.body.appendChild(container);
+
+      this.container = container;
+      this.canvas = canvas;
+      this.ctx = canvas.getContext('2d', { alpha: true });
+
+      this.resize();
+      window.addEventListener('resize', () => this.resize(), { passive: true });
+    }
+
+    resize() {
+      if (!this.canvas) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = window.innerWidth || 1200;
+      const h = 56;
+      this.canvas.width = Math.round(w * dpr);
+      this.canvas.height = Math.round(h * dpr);
+      if (this.ctx) {
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      this.updatePosition();
+    }
+
+    updatePosition() {
+      if (!this.container) return;
+      const playerBar = document.querySelector('ytmusic-player-bar');
+      if (playerBar) {
+        const rect = playerBar.getBoundingClientRect();
+        const barHeight = rect.height > 0 ? rect.height : 72;
+        this.container.style.bottom = `${Math.round(barHeight)}px`;
+      } else {
+        this.container.style.bottom = '72px';
+      }
+    }
+
+    start() {
+      if (this.isRunning) return;
+      this.isRunning = true;
+      const loop = (timestamp) => {
+        if (!this.isRunning) return;
+        this.draw(timestamp);
+        this.animId = requestAnimationFrame(loop);
+      };
+      this.animId = requestAnimationFrame(loop);
+    }
+
+    stop() {
+      this.isRunning = false;
+      if (this.animId) {
+        cancelAnimationFrame(this.animId);
+        this.animId = null;
+      }
+      if (this.ctx && this.canvas) {
+        this.ctx.clearRect(0, 0, window.innerWidth || 1200, 56);
+      }
+    }
+
+    toggle(enabled) {
+      if (this.container) {
+        this.container.classList.toggle('is-hidden', !enabled);
+      }
+      if (enabled) {
+        this.resize();
+        this.start();
+      } else {
+        this.stop();
+      }
+    }
+
+    draw(timestamp) {
+      if (!this.canvas || !this.ctx) return;
+      if (settings.waveformEnabled === false) return;
+      if (document.hidden) return;
+
+      const delta = Math.min(0.1, (timestamp - (this.lastFrameTime || timestamp)) / 1000);
+      this.lastFrameTime = timestamp;
+
+      const video = getMediaElement();
+      const isPlaying = video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime);
+      const currentTime = isPlaying ? video.currentTime : 0;
+
+      // Vocal surge: when lyric line is singing, swell the waveform dynamically
+      const hasActiveVocal = isPlaying && activeLineIndex >= 0 && currentLyrics.isSynced;
+      const baseAmp = isPlaying ? (hasActiveVocal ? 0.90 : 0.65) : 0.08;
+
+      this.currentAmplitude += (baseAmp - this.currentAmplitude) * Math.min(1, delta * 5.5);
+      this.phase += (isPlaying ? 2.8 : 0.6) * delta;
+
+      const w = window.innerWidth || 1200;
+      const h = 56;
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, w, h);
+
+      const colors = (ambientEngine && ambientEngine.getSampledColors)
+        ? ambientEngine.getSampledColors()
+        : getTrackColorPalette(getCurrentTrackInfo());
+
+      const c1 = colors.primary || 'rgb(212, 83, 78)';
+      const c2 = colors.secondary || 'rgb(255, 117, 140)';
+
+      const style = settings.waveformStyle || 'waves';
+      if (style === 'bars') {
+        this.drawSpectrumBars(ctx, w, h, c1, c2, currentTime, isPlaying, delta);
+      } else if (style === 'pulse') {
+        this.drawPulseLine(ctx, w, h, c1, c2, currentTime, isPlaying);
+      } else {
+        this.drawFluidWaves(ctx, w, h, c1, c2, currentTime, isPlaying);
+      }
+    }
+
+    drawFluidWaves(ctx, w, h, c1, c2, currentTime, isPlaying) {
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(0.5, c2);
+      grad.addColorStop(1, c1);
+
+      const amp = this.currentAmplitude * 28;
+
+      // Layer 1: Back harmonic wave (22% opacity)
+      this.renderWaveCurve(ctx, w, h, grad, 0.22, 0.005, this.phase * 0.75, amp * 0.7, 0);
+
+      // Layer 2: Mid harmonic wave (45% opacity)
+      this.renderWaveCurve(ctx, w, h, grad, 0.45, 0.008, this.phase * 1.25 + 1.2, amp * 0.85, 0);
+
+      // Layer 3: Foreground wave with glowing crest (85% opacity)
+      this.renderWaveCurve(ctx, w, h, grad, 0.85, 0.012, this.phase * 1.75 + 2.5, amp, 1);
+    }
+
+    renderWaveCurve(ctx, w, h, fillGrad, opacity, freq, phase, amp, strokeLevel) {
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+
+      const step = 6;
+      for (let x = 0; x <= w + step; x += step) {
+        const sin1 = Math.sin(x * freq + phase);
+        const cos1 = Math.cos(x * freq * 0.6 + phase * 0.8);
+        const y = h - (sin1 * amp) - (cos1 * (amp * 0.35));
+        ctx.lineTo(x, Math.max(2, Math.min(h, y)));
+      }
+
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      ctx.fillStyle = fillGrad;
+      ctx.fill();
+
+      if (strokeLevel > 0) {
+        ctx.shadowColor = fillGrad;
+        ctx.shadowBlur = 10;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    drawSpectrumBars(ctx, w, h, c1, c2, currentTime, isPlaying, delta) {
+      const count = this.barsCount;
+      const gap = 3;
+      const barW = Math.max(2, (w - (count - 1) * gap) / count);
+
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(0.5, c2);
+      grad.addColorStop(1, c1);
+
+      ctx.save();
+      ctx.fillStyle = grad;
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 8;
+
+      for (let i = 0; i < count; i++) {
+        let targetH = 3;
+        if (isPlaying) {
+          const h1 = Math.sin(i * 0.18 + this.phase * 2.2);
+          const h2 = Math.cos(i * 0.32 + currentTime * 3.8);
+          const h3 = Math.sin((count - i) * 0.14 + this.phase * 1.4);
+          const combined = Math.abs(h1 * 0.45 + h2 * 0.35 + h3 * 0.20);
+          targetH = Math.max(3, combined * this.currentAmplitude * 44);
+        }
+
+        this.barHeights[i] += (targetH - this.barHeights[i]) * Math.min(1, delta * 14);
+        const barH = Math.max(3, Math.min(h - 4, this.barHeights[i]));
+        const x = i * (barW + gap);
+        const y = h - barH;
+
+        ctx.beginPath();
+        const radius = Math.min(barW / 2, 4);
+        if (ctx.roundRect) {
+          ctx.roundRect(x, y, barW, barH, [radius, radius, 0, 0]);
+        } else {
+          ctx.rect(x, y, barW, barH);
+        }
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    drawPulseLine(ctx, w, h, c1, c2, currentTime, isPlaying) {
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, c1);
+      grad.addColorStop(0.5, c2);
+      grad.addColorStop(1, c1);
+
+      ctx.save();
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 14;
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.beginPath();
+      const centerY = h - 14;
+      const amp = this.currentAmplitude * 20;
+
+      ctx.moveTo(0, centerY);
+      const step = 8;
+      for (let x = 0; x <= w + step; x += step) {
+        const normX = x / w;
+        const envelope = Math.sin(normX * Math.PI);
+        const osc = Math.sin(x * 0.02 + this.phase * 2.5) * Math.cos(x * 0.008 + currentTime * 3.0);
+        const y = centerY - (osc * amp * envelope);
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   const ambientEngine = new AmbientLightEngine();
+  const waveformEngine = new WaveformVisualizerEngine();
 
   // ==========================================================================
   // TRACK INFO, COVER DECOMPOSER & LYRICS TAB INTEGRATION
@@ -2165,6 +2547,18 @@
             </div>
             <input type="range" id="lyris-opt-fade" min="0" max="1.5" step="0.05" value="0.15">
           </div>
+          <label class="lyris-setting">
+            <span>Audio waveform visualizer</span>
+            <input type="checkbox" id="lyris-opt-waveform-enabled">
+          </label>
+          <label class="lyris-setting">
+            <span>Waveform style</span>
+            <select id="lyris-opt-waveform-style">
+              <option value="waves">Fluid waves (glow)</option>
+              <option value="bars">Spectrum bars (EQ)</option>
+              <option value="pulse">Pulse line</option>
+            </select>
+          </label>
           <button class="lyris-text-action" id="lyris-reset-light-btn">Reset light settings</button>
         </div>
 
@@ -2423,6 +2817,25 @@
       });
     }
 
+    const waveToggle = panel.querySelector('#lyris-opt-waveform-enabled');
+    if (waveToggle) {
+      waveToggle.addEventListener('change', () => {
+        const val = waveToggle.checked;
+        settings.waveformEnabled = val;
+        saveSetting('waveformEnabled', val);
+        waveformEngine.toggle(val);
+      });
+    }
+
+    const waveStyleSelect = panel.querySelector('#lyris-opt-waveform-style');
+    if (waveStyleSelect) {
+      waveStyleSelect.addEventListener('change', () => {
+        const val = waveStyleSelect.value;
+        settings.waveformStyle = val;
+        saveSetting('waveformStyle', val);
+      });
+    }
+
     // Reset Light
     const resetLightBtn = panel.querySelector('#lyris-reset-light-btn');
     if (resetLightBtn) {
@@ -2435,6 +2848,8 @@
         settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
         settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
         settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
+        settings.waveformEnabled = DEFAULT_SETTINGS.waveformEnabled;
+        settings.waveformStyle = DEFAULT_SETTINGS.waveformStyle;
 
         const toSave = {
           ambientEnabled: DEFAULT_SETTINGS.ambientEnabled,
@@ -2444,7 +2859,9 @@
           ambientSpread: DEFAULT_SETTINGS.ambientSpread,
           ambientBlur: DEFAULT_SETTINGS.ambientBlur,
           ambientSaturation: DEFAULT_SETTINGS.ambientSaturation,
-          ambientFadeDuration: DEFAULT_SETTINGS.ambientFadeDuration
+          ambientFadeDuration: DEFAULT_SETTINGS.ambientFadeDuration,
+          waveformEnabled: DEFAULT_SETTINGS.waveformEnabled,
+          waveformStyle: DEFAULT_SETTINGS.waveformStyle
         };
         try {
           chrome.storage.sync.set(toSave);
@@ -2459,6 +2876,7 @@
         ambientEngine.updateBlur(DEFAULT_SETTINGS.ambientBlur);
         ambientEngine.updateSaturation(DEFAULT_SETTINGS.ambientSaturation);
         ambientEngine.updateFadeDuration(DEFAULT_SETTINGS.ambientFadeDuration);
+        waveformEngine.toggle(DEFAULT_SETTINGS.waveformEnabled);
         updateLyrisSettingsUI();
         showToast('Light settings reset to defaults');
       });
@@ -2540,6 +2958,12 @@
     const fade = settings.ambientFadeDuration ?? 0.15;
     if (fadeInput) fadeInput.value = fade;
     if (fadeVal) fadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
+
+    const waveOpt = panel.querySelector('#lyris-opt-waveform-enabled');
+    if (waveOpt) waveOpt.checked = settings.waveformEnabled !== false;
+
+    const waveStyleOpt = panel.querySelector('#lyris-opt-waveform-style');
+    if (waveStyleOpt) waveStyleOpt.value = settings.waveformStyle || 'waves';
 
     renderSourcesListUI();
     updateQuickControlsUI();
@@ -3727,6 +4151,7 @@
       }
 
       ambientEngine.injectContainers();
+      waveformEngine.updatePosition();
       injectIntegratedTriggers();
     }, 500);
 
@@ -3736,6 +4161,7 @@
   function init() {
     loadSettings();
     ambientEngine.init();
+    waveformEngine.init();
     forceEnableNativeLyricsTab();
     injectLyricsWrapper();
     injectIntegratedTriggers();
@@ -3751,7 +4177,8 @@
     globalThis.__LYRIS_TEST_HOOK__({
       parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
       hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
-      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS
+      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS,
+      getTrackColorPalette, hslToRgb
     });
     return;
   }
