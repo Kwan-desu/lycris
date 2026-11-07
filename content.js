@@ -2818,16 +2818,67 @@
     return result;
   }
 
-  const TOKENIZE_REGEX = /([\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]|[\p{L}\p{N}']+|\s+|[^\s\p{L}\p{N}]+)/gu;
-
   function tokenizeLineText(text) {
     if (!text) return [];
-    TOKENIZE_REGEX.lastIndex = 0;
+    const compounds = (typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) || {};
     const tokens = [];
-    let match;
-    while ((match = TOKENIZE_REGEX.exec(text)) !== null) {
-      if (match[0]) tokens.push(match[0]);
+    let i = 0;
+    const len = text.length;
+
+    while (i < len) {
+      const ch = text[i];
+
+      // Whitespace
+      if (/\s/.test(ch)) {
+        let space = ch;
+        i++;
+        while (i < len && /\s/.test(text[i])) {
+          space += text[i];
+          i++;
+        }
+        tokens.push(space);
+        continue;
+      }
+
+      // Latin words / numbers / apostrophes (split per word)
+      if (/^[\p{L}\p{N}']+$/u.test(ch) && !/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch)) {
+        let word = ch;
+        i++;
+        while (i < len && /^[\p{L}\p{N}']+$/u.test(text[i]) && !/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(text[i])) {
+          word += text[i];
+          i++;
+        }
+        tokens.push(word);
+        continue;
+      }
+
+      // CJK characters (Japanese, Chinese, Korean)
+      if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch)) {
+        // Try compound match in dictionary (longest match first from 5 down to 2)
+        let matched = false;
+        const maxSub = Math.min(len - i, 5);
+        for (let l = maxSub; l >= 2; l--) {
+          const sub = text.slice(i, i + l);
+          if (compounds[sub]) {
+            tokens.push(sub);
+            i += l;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) continue;
+
+        // Standalone CJK character
+        tokens.push(ch);
+        i++;
+        continue;
+      }
+
+      // Other punctuation / symbols
+      tokens.push(ch);
+      i++;
     }
+
     return tokens.length > 0 ? tokens : [text];
   }
   function computeWordTimings(line, nextLine) {

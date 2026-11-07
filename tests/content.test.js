@@ -112,6 +112,15 @@ test('Japanese kanji readings and furigana alignment use accurate dictionary rea
     api.convertJapaneseLine('走り出す', 'furigana'),
     '<ruby class="am-ruby"><rb>走</rb><rt>はし</rt></ruby>り<ruby class="am-ruby"><rb>出</rb><rt>だ</rt></ruby>す'
   );
+
+  // Word tokenization in karaoke preserves compound words so furigana/readings are intact
+  const timedWords = api.computeWordTimings({ time: 0, text: '言葉にできない' }).filter(w => !w.isSpace);
+  assert.equal(timedWords[0].text, '言葉');
+  assert.equal(
+    api.convertJapaneseLine(timedWords[0].text, 'furigana'),
+    '<ruby class="am-ruby"><rb>言葉</rb><rt>ことば</rt></ruby>'
+  );
+  assert.equal(api.convertJapaneseLine(timedWords[0].text, 'romaji'), 'kotoba');
 });
 
 test('addFurigana never injects unescaped markup from lyric text', () => {
