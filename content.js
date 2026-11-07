@@ -40,9 +40,7 @@
     fontSize: 40, // 40px default (Apple Music typography contract)
     clickToSeek: true,
     syncOffset: 0,
-    trackOffsets: {}, // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
-    waveformEnabled: true, // Audio waveform visualizer above player bar
-    waveformStyle: 'ribbon' // 'ribbon' (Siri Fluid Ribbon) | 'nodes' (Harmonic Nodes)
+    trackOffsets: {} // Persistent per-song/MV offset storage { [trackKey]: offsetMs }
   };
 
   const HIGHLIGHT_STYLES = [
@@ -257,15 +255,6 @@
     } else {
       persist();
     }
-  }
-
-  function getMediaElement() {
-    return document.querySelector('#movie_player video.html5-main-video') ||
-           document.querySelector('video.html5-main-video') ||
-           document.querySelector('#movie_player video') ||
-           document.querySelector('ytmusic-player video') ||
-           document.querySelector('video') ||
-           document.querySelector('audio');
   }
 
   function getEffectiveOffset() {
@@ -742,7 +731,7 @@
                                songImage.naturalHeight > 0;
 
       // 2. Check HTML5 Video (Video Mode / Music Video)
-      const video = getMediaElement();
+      const video = document.querySelector('video');
       const isVideoReady = video &&
                            video.readyState >= 2 &&
                            video.videoWidth > 0 &&
@@ -992,7 +981,7 @@
         }
         // Fallback: try video if valid
         if (!drawn) {
-          const v = getMediaElement();
+          const v = document.querySelector('video');
           if (v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
             try {
               this.bufferCtx.drawImage(v, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
@@ -1055,472 +1044,9 @@
       settings.ambientFadeDuration = parseFloat(val);
       applySettingsToDOM();
     }
-
-    getSampledColors() {
-      if (this.currentPalette && this.currentPaletteKey === this.lastDrawnKey) {
-        return this.currentPalette;
-      }
-
-      let primary = null;
-      let secondary = null;
-
-      try {
-        if (this.bufferCanvas && this.bufferCtx && this.bufferCanvas.width > 0 && this.bufferCanvas.height > 0) {
-          const w = this.bufferCanvas.width;
-          const h = this.bufferCanvas.height;
-          const stepX = Math.max(1, Math.floor(w / 14));
-          const stepY = Math.max(1, Math.floor(h / 14));
-          const imgData = this.bufferCtx.getImageData(0, 0, w, h).data;
-          const scored = [];
-
-          for (let y = stepY; y < h - stepY; y += stepY) {
-            for (let x = stepX; x < w - stepX; x += stepX) {
-              const idx = (y * w + x) * 4;
-              const r = imgData[idx];
-              const g = imgData[idx + 1];
-              const b = imgData[idx + 2];
-              const max = Math.max(r, g, b);
-              const min = Math.min(r, g, b);
-              const sat = max === 0 ? 0 : (max - min) / max;
-              const lum = (max + min) / 510;
-
-              if (lum > 0.12 && lum < 0.88 && sat > 0.15) {
-                const score = sat * (1 - Math.abs(lum - 0.5) * 0.8);
-                scored.push({ r, g, b, sat, lum, score });
-              }
-            }
-          }
-
-          scored.sort((a, b) => b.score - a.score);
-          if (scored.length > 0) {
-            primary = [scored[0].r, scored[0].g, scored[0].b];
-            const sec = scored.find(p => {
-              const diff = Math.abs(p.r - primary[0]) + Math.abs(p.g - primary[1]) + Math.abs(p.b - primary[2]);
-              return diff > 75;
-            });
-            if (sec) {
-              secondary = [sec.r, sec.g, sec.b];
-            } else {
-              secondary = [
-                Math.min(255, Math.max(0, primary[1] + 30)),
-                Math.min(255, Math.max(0, primary[2] + 40)),
-                Math.min(255, Math.max(0, primary[0] + 50))
-              ];
-            }
-          }
-        }
-      } catch (e) {
-        // Tainted canvas by cross-origin video is expected; fallback gracefully
-      }
-
-      if (!primary) {
-        const track = (typeof getCurrentTrackInfo === 'function') ? getCurrentTrackInfo() : null;
-        const fallback = getTrackColorPalette(track);
-        this.currentPalette = fallback;
-        this.currentPaletteKey = this.lastDrawnKey;
-        return this.currentPalette;
-      }
-
-      this.currentPalette = {
-        primary: `rgb(${primary[0]}, ${primary[1]}, ${primary[2]})`,
-        secondary: `rgb(${secondary[0]}, ${secondary[1]}, ${secondary[2]})`,
-        primaryRgb: primary,
-        secondaryRgb: secondary
-      };
-      this.currentPaletteKey = this.lastDrawnKey;
-      return this.currentPalette;
-    }
-  }
-
-  function hslToRgb(h, s, l) {
-    h = (h % 360 + 360) % 360;
-    const c = (1 - Math.abs(2 * l - 1)) * s;
-    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-    const m = l - c / 2;
-    let r = 0, g = 0, b = 0;
-    if (h < 60) { r = c; g = x; }
-    else if (h < 120) { r = x; g = c; }
-    else if (h < 180) { g = c; b = x; }
-    else if (h < 240) { g = x; b = c; }
-    else if (h < 300) { r = x; b = c; }
-    else { r = c; b = x; }
-    return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
-  }
-
-  function getTrackColorPalette(trackInfo) {
-    const title = (trackInfo && (trackInfo.cleanTitle || trackInfo.title)) || 'song';
-    const artist = (trackInfo && (trackInfo.cleanArtist || trackInfo.artist)) || 'artist';
-    const str = `${title}__${artist}`.toLowerCase();
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    const hue1 = Math.abs(hash) % 360;
-    const hue2 = (hue1 + 45 + (Math.abs(hash >> 4) % 60)) % 360;
-    return {
-      primary: `hsl(${hue1}, 85%, 58%)`,
-      secondary: `hsl(${hue2}, 90%, 65%)`,
-      primaryRgb: hslToRgb(hue1, 0.85, 0.58),
-      secondaryRgb: hslToRgb(hue2, 0.90, 0.65)
-    };
-  }
-
-  // ==========================================================================
-  // AUDIO WAVEFORM VISUALIZER (SYNCED WITH AMBIENT MUSIC PALETTE)
-  // ==========================================================================
-
-  class WaveformVisualizerEngine {
-    constructor() {
-      this.container = null;
-      this.canvas = null;
-      this.ctx = null;
-      this.animId = null;
-      this.currentAmplitude = 0;
-      this.phase = 0;
-      this.lastFrameTime = 0;
-      this.isRunning = false;
-    }
-
-    init() {
-      this.inject();
-      if (settings.waveformEnabled !== false) {
-        this.start();
-      }
-    }
-
-    inject() {
-      if (document.getElementById('lyris-waveform-container')) return;
-
-      const container = document.createElement('div');
-      container.id = 'lyris-waveform-container';
-      container.className = 'lyris-waveform';
-      if (settings.waveformEnabled === false) {
-        container.classList.add('is-hidden');
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.id = 'lyris-waveform-canvas';
-
-      container.appendChild(canvas);
-      document.body.appendChild(container);
-
-      this.container = container;
-      this.canvas = canvas;
-      this.ctx = canvas.getContext('2d', { alpha: true });
-
-      this.resize();
-      window.addEventListener('resize', () => this.resize(), { passive: true });
-    }
-
-    resize() {
-      if (!this.canvas) return;
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      const w = window.innerWidth || 1200;
-      const h = 64;
-      this.canvas.width = Math.round(w * dpr);
-      this.canvas.height = Math.round(h * dpr);
-      if (this.ctx) {
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
-      this.updatePosition();
-    }
-
-    updatePosition() {
-      if (!this.container) return;
-      const playerBar = document.querySelector('ytmusic-player-bar');
-      if (playerBar) {
-        const rect = playerBar.getBoundingClientRect();
-        const barHeight = rect.height > 0 ? rect.height : 72;
-        this.container.style.bottom = `${Math.round(barHeight)}px`;
-      } else {
-        this.container.style.bottom = '72px';
-      }
-    }
-
-    start() {
-      if (this.isRunning) return;
-      this.isRunning = true;
-      const loop = (timestamp) => {
-        if (!this.isRunning) return;
-        this.draw(timestamp);
-        this.animId = requestAnimationFrame(loop);
-      };
-      this.animId = requestAnimationFrame(loop);
-    }
-
-    stop() {
-      this.isRunning = false;
-      if (this.animId) {
-        cancelAnimationFrame(this.animId);
-        this.animId = null;
-      }
-      if (this.ctx && this.canvas) {
-        this.ctx.clearRect(0, 0, window.innerWidth || 1200, 64);
-      }
-    }
-
-    toggle(enabled) {
-      if (this.container) {
-        this.container.classList.toggle('is-hidden', !enabled);
-      }
-      if (enabled) {
-        this.resize();
-        this.start();
-      } else {
-        this.stop();
-      }
-    }
-
-    draw(timestamp) {
-      if (!this.canvas || !this.ctx) return;
-      if (settings.waveformEnabled === false) return;
-      if (document.hidden) return;
-
-      const delta = Math.min(0.1, (timestamp - (this.lastFrameTime || timestamp)) / 1000);
-      this.lastFrameTime = timestamp;
-
-      const video = getMediaElement();
-      const isPlaying = video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime);
-      const playbackRate = (video && typeof video.playbackRate === 'number' && video.playbackRate > 0) ? video.playbackRate : 1.0;
-      const currentTime = isPlaying ? video.currentTime : 0;
-
-      // Vocal surge: swell waveform amplitude during active lyric singing
-      const hasActiveVocal = isPlaying && activeLineIndex >= 0 && currentLyrics.isSynced;
-      const targetAmp = isPlaying ? (hasActiveVocal ? 1.0 : 0.72) : 0.04;
-
-      this.currentAmplitude += (targetAmp - this.currentAmplitude) * Math.min(1, delta * 5.5);
-      this.phase += (isPlaying ? 2.2 * playbackRate : 0.35) * delta;
-
-      const w = window.innerWidth || 1200;
-      const h = 64;
-      const ctx = this.ctx;
-      ctx.clearRect(0, 0, w, h);
-
-      const colors = (ambientEngine && ambientEngine.getSampledColors)
-        ? ambientEngine.getSampledColors()
-        : getTrackColorPalette(getCurrentTrackInfo());
-
-      const c1Rgb = (colors && colors.primaryRgb) || [255, 140, 0];
-      const c2Rgb = (colors && colors.secondaryRgb) || [255, 195, 0];
-
-      const isNodes = (settings.waveformStyle === 'nodes');
-      if (isNodes) {
-        this.drawHarmonicNodes(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying);
-      } else {
-        this.drawFluidRibbon(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying);
-      }
-    }
-
-    /**
-     * Production-ready Apple Siri Fluid Ribbon Visualizer.
-     * Generates 3 silky harmonic fluid layers with Gaussian taper and additive screen blending.
-     */
-    drawFluidRibbon(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying) {
-      const yMid = h / 2;
-      const maxAmp = 22; // Maximum peak displacement in pixels
-      const amp = this.currentAmplitude * maxAmp;
-
-      // 1. Subtle luminous baseline connecting across the full screen
-      const baseAlpha = isPlaying ? 0.22 : 0.12;
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(0, yMid);
-      ctx.lineTo(w, yMid);
-      ctx.strokeStyle = `rgba(${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}, ${baseAlpha})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-
-      if (amp < 0.2) return;
-
-      // 2. Multi-layered fluid ribbon rendering with 'screen' composition
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-
-      const layers = [
-        {
-          // Layer 0: Deep harmonic base ribbon
-          rgb: c2Rgb,
-          fillAlpha: 0.26,
-          strokeAlpha: 0.72,
-          glowAlpha: 0.50,
-          freq1: 0.0035,
-          freq2: 0.0070,
-          phaseOffset: this.phase * 0.75,
-          ampScale: 0.75,
-          upperSkew: 1.0,
-          lowerSkew: 0.85
-        },
-        {
-          // Layer 1: Central singing ribbon (primary vocal resonance)
-          rgb: c1Rgb,
-          fillAlpha: 0.36,
-          strokeAlpha: 0.90,
-          glowAlpha: 0.75,
-          freq1: 0.0050,
-          freq2: 0.0100,
-          phaseOffset: this.phase * 1.15 + 1.2,
-          ampScale: 1.00,
-          upperSkew: 1.05,
-          lowerSkew: 0.95
-        },
-        {
-          // Layer 2: Fast counter-harmonic ribbon (golden/bright accent)
-          rgb: [
-            Math.min(255, Math.round((c1Rgb[0] + c2Rgb[0]) * 0.5 + 20)),
-            Math.min(255, Math.round((c1Rgb[1] + c2Rgb[1]) * 0.5 + 20)),
-            Math.min(255, Math.round((c1Rgb[2] + c2Rgb[2]) * 0.5 + 10))
-          ],
-          fillAlpha: 0.22,
-          strokeAlpha: 0.68,
-          glowAlpha: 0.45,
-          freq1: 0.0068,
-          freq2: 0.0135,
-          phaseOffset: this.phase * 1.45 + 2.8,
-          ampScale: 0.82,
-          upperSkew: 0.92,
-          lowerSkew: 1.10
-        }
-      ];
-
-      const step = 4;
-      const numSteps = Math.ceil(w / step);
-
-      for (let l = 0; l < layers.length; l++) {
-        const layer = layers[l];
-        const rgbStr = `${layer.rgb[0]}, ${layer.rgb[1]}, ${layer.rgb[2]}`;
-        const p1 = layer.phaseOffset;
-        const p2 = layer.phaseOffset * 0.82 + 0.5;
-        const lAmp = amp * layer.ampScale;
-
-        ctx.beginPath();
-        ctx.moveTo(0, yMid);
-
-        // Upper boundary curve (left to right)
-        for (let i = 0; i <= numSteps; i++) {
-          const x = Math.min(w, i * step);
-          const u = x / w;
-          // Smooth Hann taper with Gaussian core: zero at edges, full blooming at center
-          const dist = Math.abs(2 * u - 1);
-          const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
-          const s1 = Math.sin(x * layer.freq1 + p1);
-          const c1 = Math.cos(x * layer.freq2 - p2);
-          const disp = (s1 * 0.75 + c1 * 0.25) * lAmp * layer.upperSkew * env;
-          ctx.lineTo(x, yMid - disp);
-        }
-
-        // Lower boundary curve (right to left)
-        for (let i = numSteps; i >= 0; i--) {
-          const x = Math.min(w, i * step);
-          const u = x / w;
-          const dist = Math.abs(2 * u - 1);
-          const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
-          const s1 = Math.sin(x * layer.freq1 * 0.95 + p1 + 0.45);
-          const c1 = Math.cos(x * layer.freq2 * 0.92 - p2 + 0.35);
-          const disp = (s1 * 0.70 + c1 * 0.30) * lAmp * layer.lowerSkew * env;
-          ctx.lineTo(x, yMid + disp);
-        }
-
-        ctx.closePath();
-
-        // Translucent fluid body fill
-        ctx.fillStyle = `rgba(${rgbStr}, ${layer.fillAlpha})`;
-        ctx.fill();
-
-        // Glowing ribbon boundary stroke
-        ctx.shadowColor = `rgba(${rgbStr}, ${layer.glowAlpha})`;
-        ctx.shadowBlur = 10;
-        ctx.strokeStyle = `rgba(${rgbStr}, ${layer.strokeAlpha})`;
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
-      }
-
-      ctx.restore();
-    }
-
-    /**
-     * Resonant Harmonic Nodes Visualizer (Image 2 design).
-     * Symmetrical counter-phase strands intersecting at harmonic nodal points.
-     */
-    drawHarmonicNodes(ctx, w, h, c1Rgb, c2Rgb, currentTime, isPlaying) {
-      const yMid = h / 2;
-      const maxAmp = 22;
-      const amp = this.currentAmplitude * maxAmp;
-
-      // 1. Luminous center baseline
-      const baseAlpha = isPlaying ? 0.22 : 0.12;
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(0, yMid);
-      ctx.lineTo(w, yMid);
-      ctx.strokeStyle = `rgba(${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}, ${baseAlpha})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
-
-      if (amp < 0.2) return;
-
-      ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-
-      const step = 4;
-      const numSteps = Math.ceil(w / step);
-      const freq = 0.0062;
-      const p = this.phase * 0.95;
-
-      const rgb1 = `${c1Rgb[0]}, ${c1Rgb[1]}, ${c1Rgb[2]}`;
-      const rgb2 = `${c2Rgb[0]}, ${c2Rgb[1]}, ${c2Rgb[2]}`;
-
-      // Build closed path between upper & lower counter-phase waves
-      ctx.beginPath();
-      ctx.moveTo(0, yMid);
-
-      // Upper curve
-      for (let i = 0; i <= numSteps; i++) {
-        const x = Math.min(w, i * step);
-        const u = x / w;
-        const dist = Math.abs(2 * u - 1);
-        const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
-        const s = Math.sin(x * freq + p) + 0.12 * Math.sin(x * freq * 3.0 + p * 1.5);
-        const y = yMid - (s * amp * env);
-        ctx.lineTo(x, y);
-      }
-
-      // Lower curve (counter-phase return)
-      for (let i = numSteps; i >= 0; i--) {
-        const x = Math.min(w, i * step);
-        const u = x / w;
-        const dist = Math.abs(2 * u - 1);
-        const env = dist >= 1 ? 0 : Math.pow(Math.cos(dist * Math.PI * 0.5), 1.8);
-        const s = Math.sin(x * freq + p) + 0.12 * Math.sin(x * freq * 3.0 + p * 1.5);
-        const y = yMid + (s * amp * env);
-        ctx.lineTo(x, y);
-      }
-
-      ctx.closePath();
-
-      // Vertical gradient body fill
-      const grad = ctx.createLinearGradient(0, yMid - amp, 0, yMid + amp);
-      grad.addColorStop(0, `rgba(${rgb1}, 0.35)`);
-      grad.addColorStop(0.5, `rgba(${rgb2}, 0.12)`);
-      grad.addColorStop(1, `rgba(${rgb1}, 0.35)`);
-      ctx.fillStyle = grad;
-      ctx.fill();
-
-      // Glowing border lines
-      ctx.shadowColor = `rgba(${rgb1}, 0.85)`;
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = `rgba(${rgb1}, 0.92)`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      ctx.restore();
-    }
   }
 
   const ambientEngine = new AmbientLightEngine();
-  const waveformEngine = new WaveformVisualizerEngine();
 
   // ==========================================================================
   // TRACK INFO, COVER DECOMPOSER & LYRICS TAB INTEGRATION
@@ -1729,7 +1255,7 @@
       if (imgElem) artwork = imgElem.src;
     }
 
-    const video = getMediaElement();
+    const video = document.querySelector('video');
     if (video && !isNaN(video.duration) && video.duration > 0) {
       duration = Math.round(video.duration);
     }
@@ -2630,17 +2156,6 @@
             </div>
             <input type="range" id="lyris-opt-fade" min="0" max="1.5" step="0.05" value="0.15">
           </div>
-          <label class="lyris-setting">
-            <span>Audio waveform visualizer</span>
-            <input type="checkbox" id="lyris-opt-waveform-enabled">
-          </label>
-          <label class="lyris-setting">
-            <span>Waveform style</span>
-            <select id="lyris-opt-waveform-style">
-              <option value="ribbon">Siri Fluid Ribbon</option>
-              <option value="nodes">Harmonic Nodes</option>
-            </select>
-          </label>
           <button class="lyris-text-action" id="lyris-reset-light-btn">Reset light settings</button>
         </div>
 
@@ -2899,25 +2414,6 @@
       });
     }
 
-    const waveToggle = panel.querySelector('#lyris-opt-waveform-enabled');
-    if (waveToggle) {
-      waveToggle.addEventListener('change', () => {
-        const val = waveToggle.checked;
-        settings.waveformEnabled = val;
-        saveSetting('waveformEnabled', val);
-        waveformEngine.toggle(val);
-      });
-    }
-
-    const waveStyleSelect = panel.querySelector('#lyris-opt-waveform-style');
-    if (waveStyleSelect) {
-      waveStyleSelect.addEventListener('change', () => {
-        const val = waveStyleSelect.value;
-        settings.waveformStyle = val;
-        saveSetting('waveformStyle', val);
-      });
-    }
-
     // Reset Light
     const resetLightBtn = panel.querySelector('#lyris-reset-light-btn');
     if (resetLightBtn) {
@@ -2930,8 +2426,6 @@
         settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
         settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
         settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
-        settings.waveformEnabled = DEFAULT_SETTINGS.waveformEnabled;
-        settings.waveformStyle = DEFAULT_SETTINGS.waveformStyle;
 
         const toSave = {
           ambientEnabled: DEFAULT_SETTINGS.ambientEnabled,
@@ -2941,9 +2435,7 @@
           ambientSpread: DEFAULT_SETTINGS.ambientSpread,
           ambientBlur: DEFAULT_SETTINGS.ambientBlur,
           ambientSaturation: DEFAULT_SETTINGS.ambientSaturation,
-          ambientFadeDuration: DEFAULT_SETTINGS.ambientFadeDuration,
-          waveformEnabled: DEFAULT_SETTINGS.waveformEnabled,
-          waveformStyle: DEFAULT_SETTINGS.waveformStyle
+          ambientFadeDuration: DEFAULT_SETTINGS.ambientFadeDuration
         };
         try {
           chrome.storage.sync.set(toSave);
@@ -2958,7 +2450,6 @@
         ambientEngine.updateBlur(DEFAULT_SETTINGS.ambientBlur);
         ambientEngine.updateSaturation(DEFAULT_SETTINGS.ambientSaturation);
         ambientEngine.updateFadeDuration(DEFAULT_SETTINGS.ambientFadeDuration);
-        waveformEngine.toggle(DEFAULT_SETTINGS.waveformEnabled);
         updateLyrisSettingsUI();
         showToast('Light settings reset to defaults');
       });
@@ -3040,12 +2531,6 @@
     const fade = settings.ambientFadeDuration ?? 0.15;
     if (fadeInput) fadeInput.value = fade;
     if (fadeVal) fadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
-
-    const waveOpt = panel.querySelector('#lyris-opt-waveform-enabled');
-    if (waveOpt) waveOpt.checked = settings.waveformEnabled !== false;
-
-    const waveStyleOpt = panel.querySelector('#lyris-opt-waveform-style');
-    if (waveStyleOpt) waveStyleOpt.value = (settings.waveformStyle === 'nodes') ? 'nodes' : 'ribbon';
 
     renderSourcesListUI();
     updateQuickControlsUI();
@@ -3431,7 +2916,7 @@
         }
       });
       lineElem.addEventListener('click', (e) => {
-        const video = getMediaElement();
+        const video = document.querySelector('video');
         if (!video) return;
 
         // Quick Calibration: Alt+Click or Shift+Click aligns lyric line to current playback
@@ -3611,7 +3096,7 @@
   function updateActiveLine() {
     if (!currentLyrics.isSynced || !Array.isArray(currentLyrics.lines) || currentLyrics.lines.length === 0) return;
 
-    const video = getMediaElement();
+    const video = document.querySelector('video');
     if (!video || typeof video.currentTime !== 'number' || isNaN(video.currentTime)) return;
 
     const currentTime = video.currentTime + (getEffectiveOffset() / 1000);
@@ -3749,7 +3234,7 @@
   }
 
   function tryGetCaptionsLyrics() {
-    const video = getMediaElement();
+    const video = document.querySelector('video');
     if (video && video.textTracks && video.textTracks.length > 0) {
       const tracks = Array.from(video.textTracks);
       // Prioritize active or showing tracks
@@ -3824,7 +3309,7 @@
       durationRetryCount = 0;
     }
 
-    const video = getMediaElement();
+    const video = document.querySelector('video');
     if (video && (isNaN(video.duration) || video.duration === 0)) {
       if (durationRetryCount < 6) {
         durationRetryCount++;
@@ -4004,7 +3489,7 @@
         }
 
         // If cues are still being parsed by browser video element, retry once after short delay
-        const video = getMediaElement();
+        const video = document.querySelector('video');
         if (video && video.textTracks && video.textTracks.length > 0) {
           setTimeout(() => {
             if (requestId !== currentFetchRequestId) return;
@@ -4058,9 +3543,9 @@
   function timeSyncLoop() {
     lastRafTimestamp = Date.now();
     try {
-      const video = getMediaElement();
+      const video = document.querySelector('video');
       if (video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime)) {
-        if (Math.abs(video.currentTime - lastObservedTime) > 0.02) {
+        if (Math.abs(video.currentTime - lastObservedTime) > 0.04) {
           lastObservedTime = video.currentTime;
           updateActiveLine();
         }
@@ -4074,7 +3559,7 @@
 
   let lastBoundVideo = null;
   function bindVideoEvents() {
-    const video = getMediaElement();
+    const video = document.querySelector('video');
     if (video && video !== lastBoundVideo) {
       lastBoundVideo = video;
       video.addEventListener('seeking', () => updateActiveLine());
@@ -4084,12 +3569,6 @@
       });
       video.addEventListener('play', () => {
         ambientEngine.injectContainers();
-        updateActiveLine();
-      });
-      video.addEventListener('playing', () => {
-        updateActiveLine();
-      });
-      video.addEventListener('timeupdate', () => {
         updateActiveLine();
       });
     }
@@ -4211,9 +3690,6 @@
         if (!list || !list.children.length) {
           renderCurrentLyricsState();
         }
-        if (currentLyrics.isSynced) {
-          updateActiveLine();
-        }
       } else {
         if (wrapper && (!wrapper.hidden || wrapper.style.display !== 'none')) {
           deactivateCustomLyricsTab();
@@ -4233,7 +3709,6 @@
       }
 
       ambientEngine.injectContainers();
-      waveformEngine.updatePosition();
       injectIntegratedTriggers();
     }, 500);
 
@@ -4243,7 +3718,6 @@
   function init() {
     loadSettings();
     ambientEngine.init();
-    waveformEngine.init();
     forceEnableNativeLyricsTab();
     injectLyricsWrapper();
     injectIntegratedTriggers();
@@ -4259,8 +3733,7 @@
     globalThis.__LYRIS_TEST_HOOK__({
       parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
       hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
-      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS,
-      getTrackColorPalette, hslToRgb
+      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS
     });
     return;
   }
