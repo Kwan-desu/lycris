@@ -690,6 +690,40 @@
     return escapeHTML(text);
   }
 
+  function isInstrumentalText(text) {
+    if (!text || typeof text !== 'string') return true;
+    const trimmed = text.trim();
+    if (!trimmed) return true;
+    if (/^[♪♫\s\-_~•·*]+$/i.test(trimmed)) return true;
+    if (/^(\[|\()?(?:instrumental|music|solo|intro|outro|interlude)(\]|\))?$/i.test(trimmed)) return true;
+    return false;
+  }
+
+  function alignTimestampedTranslations(lines, translationLrcLines) {
+    if (!Array.isArray(lines) || !Array.isArray(translationLrcLines) || translationLrcLines.length === 0) {
+      return;
+    }
+    for (const line of lines) {
+      if (isInstrumentalText(line.text)) {
+        line.translation = '';
+        continue;
+      }
+      let bestTrans = '';
+      let minDiff = 2.5; // max 2.5s window
+      for (const tLine of translationLrcLines) {
+        if (!tLine || typeof tLine.time !== 'number') continue;
+        const diff = Math.abs(line.time - tLine.time);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestTrans = tLine.text || '';
+        }
+      }
+      if (bestTrans) {
+        line.translation = bestTrans;
+      }
+    }
+  }
+
   let isTranslatingKey = null;
 
   function fetchTranslationForCurrentLyrics() {
@@ -702,11 +736,25 @@
     if (!hasJp) return;
 
     let rawLines = [];
+    const vocalIndices = [];
+    const vocalLines = [];
     if (currentLyrics.isSynced) {
-      if (currentLyrics.translations && currentLyrics.translations.length === currentLyrics.lines.length) {
+      if (currentLyrics.translations && currentLyrics.translations.length > 0) {
         return; // Already translated
       }
-      rawLines = currentLyrics.lines.map(l => l.text || '');
+      currentLyrics.lines.forEach((line, idx) => {
+        const t = (line.text || '').trim();
+        if (t && !isInstrumentalText(t)) {
+          vocalIndices.push(idx);
+          vocalLines.push(t);
+        }
+      });
+
+      if (vocalLines.length === 0) {
+        currentLyrics.lines.forEach(l => { l.translation = ''; });
+        return;
+      }
+      rawLines = vocalLines;
     } else if (currentLyrics.plainText) {
       if (currentLyrics.translations && currentLyrics.translations.length > 0) {
         return; // Already translated
@@ -735,8 +783,13 @@
       if (response && response.success && Array.isArray(response.translations)) {
         currentLyrics.translations = response.translations;
         if (currentLyrics.isSynced) {
-          currentLyrics.lines.forEach((line, idx) => {
-            line.translation = response.translations[idx] || '';
+          currentLyrics.lines.forEach(line => {
+            line.translation = '';
+          });
+          vocalIndices.forEach((lineIdx, vIdx) => {
+            if (currentLyrics.lines[lineIdx]) {
+              currentLyrics.lines[lineIdx].translation = response.translations[vIdx] || '';
+            }
           });
           renderLyricsUI();
           updateActiveLine();
@@ -3622,6 +3675,9 @@
         if (response && response.success && response.lyrics && response.synced) {
           const parsedLines = parseLRC(response.lyrics);
           if (parsedLines && parsedLines.length > 0) {
+            if (response.translations && Array.isArray(response.translations)) {
+              alignTimestampedTranslations(parsedLines, response.translations);
+            }
             isLoadingLyrics = false;
             currentLyrics = {
               isSynced: true,
@@ -3629,6 +3685,9 @@
               plainText: '',
               source: response.source || 'Synced'
             };
+            if (response.translations && Array.isArray(response.translations)) {
+              currentLyrics.translations = response.translations;
+            }
             lyricsCache.set(trackKey, currentLyrics);
             renderCurrentLyricsState();
             return;
@@ -3923,7 +3982,8 @@
     globalThis.__LYRIS_TEST_HOOK__({
       parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
       hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
-      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS
+      containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS,
+      isInstrumentalText, alignTimestampedTranslations
     });
     return;
   }

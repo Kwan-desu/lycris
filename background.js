@@ -1159,6 +1159,15 @@ async function fetchFromQQ(query, targetTitle, targetArtist, targetDuration, isC
   return null;
 }
 
+function isInstrumentalText(text) {
+  if (!text || typeof text !== 'string') return true;
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  if (/^[♪♫\s\-_~•·*]+$/i.test(trimmed)) return true;
+  if (/^(\[|\()?(?:instrumental|music|solo|intro|outro|interlude)(\]|\))?$/i.test(trimmed)) return true;
+  return false;
+}
+
 async function handleTranslateLyrics(lines, cacheKey) {
   if (!Array.isArray(lines) || lines.length === 0) {
     return { success: false, translations: [] };
@@ -1169,10 +1178,19 @@ async function handleTranslateLyrics(lines, cacheKey) {
   }
 
   try {
-    const fullText = lines.map(l => (typeof l === 'string' ? l.trim() : '')).join('\n');
-    if (!fullText.trim()) {
-      return { success: false, translations: [] };
+    const validEntries = [];
+    lines.forEach((l, idx) => {
+      const str = typeof l === 'string' ? l.trim() : '';
+      if (str && !isInstrumentalText(str)) {
+        validEntries.push({ idx, text: str });
+      }
+    });
+
+    if (validEntries.length === 0) {
+      return { success: true, translations: lines.map(() => '') };
     }
+
+    const fullText = validEntries.map(e => e.text).join('\n');
 
     const url = 'https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=ja&tl=en&q=' + encodeURIComponent(fullText);
     const resp = await fetchWithTimeout(url, {
@@ -1193,7 +1211,10 @@ async function handleTranslateLyrics(lines, cacheKey) {
       translatedLines = data.split('\n').map(s => s.trim());
     }
 
-    const finalTranslations = lines.map((_, idx) => translatedLines[idx] || '');
+    const finalTranslations = new Array(lines.length).fill('');
+    validEntries.forEach((entry, vIdx) => {
+      finalTranslations[entry.idx] = translatedLines[vIdx] || '';
+    });
 
     if (cacheKey) {
       setBoundedCache(translationCache, cacheKey, finalTranslations);

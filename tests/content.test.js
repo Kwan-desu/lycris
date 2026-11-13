@@ -145,3 +145,35 @@ test('defaults match the documented Apple typography contract and QQ is opt-in',
     ['kugou', 'lrclib', 'native', 'netease', 'qq', 'youtube-cc']
   );
 });
+
+test('isInstrumentalText correctly identifies instrumental placeholders vs vocal text', () => {
+  assert.equal(api.isInstrumentalText(''), true);
+  assert.equal(api.isInstrumentalText('   '), true);
+  assert.equal(api.isInstrumentalText('♪'), true);
+  assert.equal(api.isInstrumentalText('♫'), true);
+  assert.equal(api.isInstrumentalText('[instrumental]'), true);
+  assert.equal(api.isInstrumentalText('(music)'), true);
+
+  assert.equal(api.isInstrumentalText('君が好きだと叫びたい'), false);
+  assert.equal(api.isInstrumentalText('Hello world'), false);
+  assert.equal(api.isInstrumentalText('言葉'), false);
+});
+
+test('alignTimestampedTranslations skips instrumental lines and aligns by proximity', () => {
+  const lines = [
+    { time: 0.0, text: '♪' },
+    { time: 10.0, text: '君が好きだと叫びたい' },
+    { time: 20.0, text: '明日を変えてみよう' }
+  ];
+  const translationLrcLines = [
+    { time: 10.2, text: 'I want to shout I love you' },
+    { time: 20.1, text: "Let's try changing tomorrow" }
+  ];
+
+  api.alignTimestampedTranslations(lines, translationLrcLines);
+
+  assert.equal(lines[0].translation, '');
+  assert.equal(lines[1].translation, 'I want to shout I love you');
+  assert.equal(lines[2].translation, "Let's try changing tomorrow");
+});
+
