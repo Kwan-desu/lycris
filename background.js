@@ -5,8 +5,22 @@
 
 const lyricsCache = new Map();
 const translationCache = new Map();
+const MAX_CACHE_ENTRIES = 100;
+
+function setBoundedCache(map, key, value) {
+  if (map.has(key)) {
+    map.delete(key);
+  } else if (map.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = map.keys().next().value;
+    if (oldestKey !== undefined) {
+      map.delete(oldestKey);
+    }
+  }
+  map.set(key, value);
+}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!request || !request.action) return false;
   if (request.action === 'FETCH_LYRICS') {
     handleFetchLyrics(request.trackInfo, request.providerOrder, request.enabledProviders)
       .then(result => sendResponse(result))
@@ -61,19 +75,23 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
   });
 }
 
-function fetchWithTimeout(url, options = {}, timeoutMs = 1500) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 1500) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  // The timer is intentionally NOT cleared the instant response headers arrive. Clearing it
-  // there (the previous ".finally" behavior) left the subsequent body read (resp.json())
-  // without any timeout. Instead the abort stays armed until the whole operation completes;
-  // calling abort() after a request has already settled is a harmless no-op. We clear the
-  // timer on rejection to avoid a dangling handle on network errors.
-  return fetch(url, { ...options, signal: controller.signal })
-    .catch(err => {
-      clearTimeout(timer);
-      throw err;
-    });
+  try {
+    let signal = controller.signal;
+    if (options && options.signal) {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+        signal = AbortSignal.any([options.signal, controller.signal]);
+      } else if (options.signal.addEventListener) {
+        options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+    }
+    const res = await fetch(url, { ...options, signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function handleFetchLyrics(trackInfo, customOrder, enabledProviders) {
@@ -128,7 +146,7 @@ async function handleFetchLyrics(trackInfo, customOrder, enabledProviders) {
       // If synchronized lyrics found on this provider, immediately return!
       if (res && res.synced) {
         if (qObj.isCover && qObj.note) res.source = `${res.source} (${qObj.note})`;
-        lyricsCache.set(cacheKey, res);
+        setBoundedCache(lyricsCache, cacheKey, res);
         return res;
       }
 
@@ -140,7 +158,7 @@ async function handleFetchLyrics(trackInfo, customOrder, enabledProviders) {
   }
 
   if (plainFallback) {
-    lyricsCache.set(cacheKey, plainFallback);
+    setBoundedCache(lyricsCache, cacheKey, plainFallback);
     return plainFallback;
   }
 
@@ -670,6 +688,52 @@ function selectBestCandidate(candidates, targetTitle, targetArtist, targetDurati
 
 // --- Providers ---
 
+function parseLRC(lrcText) {
+  if (!lrcText || typeof lrcText !== 'string') return [];
+  const lines = lrcText.split('\n');
+  const result = [];
+  const timeRegex = /\[(\d{1,3}):(\d{2}(?:[.,]\d{1,3})?)\]/g;
+  let headerOffsetSec = 0;
+
+  for (let rawLine of lines) {
+    rawLine = rawLine.trim();
+    if (!rawLine) continue;
+
+    const offsetMatch = rawLine.match(/^\[offset:\s*([+-]?\d+)\s*\]/i);
+    if (offsetMatch) {
+      const ms = parseInt(offsetMatch[1], 10);
+      if (!isNaN(ms)) headerOffsetSec = ms / 1000;
+      continue;
+    }
+
+    let match;
+    const timestamps = [];
+    timeRegex.lastIndex = 0;
+    while ((match = timeRegex.exec(rawLine)) !== null) {
+      const min = parseInt(match[1], 10);
+      const sec = parseFloat(match[2].replace(',', '.'));
+      if (!isNaN(min) && !isNaN(sec)) {
+        timestamps.push(min * 60 + sec);
+      }
+    }
+
+    const text = rawLine
+      .replace(/\[\d{1,3}:\d{2}(?:[.,]\d{1,3})?\]/g, '')
+      .replace(/<\d{1,3}:\d{2}(?:[.,]\d{1,3})?>/g, '')
+      .trim();
+
+    for (const time of timestamps) {
+      const adjustedTime = Math.max(0, time + headerOffsetSec);
+      if (!isNaN(adjustedTime) && isFinite(adjustedTime)) {
+        result.push({ time: adjustedTime, text });
+      }
+    }
+  }
+
+  result.sort((a, b) => a.time - b.time);
+  return result;
+}
+
 /**
  * Reject junk / vandalised lyric entries (seen live on LRCLIB: an exact match whose entire
  * synced lyric was "[00:00.00]probe"). A usable lyric needs a few real lines.
@@ -716,13 +780,30 @@ async function fetchFromLrclib(title, artist, duration, isCoverSong = false) {
     promises.push(
       fetchWithTimeout(getUrl, { headers }, 1500)
         .then(async resp => {
-          if (!resp.ok) return null;
-          const data = await resp.json();
-          if (data && isUsableLyrics(data.syncedLyrics, true)) {
-            return { type: 'exact_synced', match: { success: true, synced: true, lyrics: data.syncedLyrics, source: 'LRCLIB (Exact)' } };
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data && isUsableLyrics(data.syncedLyrics, true)) {
+              return { type: 'exact_synced', match: { success: true, synced: true, lyrics: data.syncedLyrics, source: 'LRCLIB (Exact)' } };
+            }
+            if (data && isUsableLyrics(data.plainLyrics, false)) {
+              return { type: 'exact_plain', match: { success: true, synced: false, lyrics: data.plainLyrics, source: 'LRCLIB (Exact)' } };
+            }
           }
-          if (data && isUsableLyrics(data.plainLyrics, false)) {
-            return { type: 'exact_plain', match: { success: true, synced: false, lyrics: data.plainLyrics, source: 'LRCLIB (Exact)' } };
+          // YouTube MVs fallback: intro/outro padding often causes duration-constrained GET to fail.
+          // Fall back to querying api/search?track_name=...&artist_name=... without strict duration matching.
+          if (duration && duration > 0) {
+            const searchFallbackUrl = `https://lrclib.net/api/search?track_name=${encodeURIComponent(cleanT)}&artist_name=${encodeURIComponent(artistToUse)}`;
+            const sResp = await fetchWithTimeout(searchFallbackUrl, { headers }, 1500);
+            if (sResp.ok) {
+              const results = await sResp.json();
+              if (Array.isArray(results) && results.length > 0) {
+                const best = selectBestCandidate(results, cleanT, cleanA, 0, isCoverSong);
+                if (best && best.synced) {
+                  return { type: 'exact_synced', match: best };
+                }
+                return { type: 'search', results };
+              }
+            }
           }
           return null;
         })
@@ -879,7 +960,25 @@ async function fetchFromNetease(query, targetTitle, targetArtist, targetDuration
         const lyricData = await lyricResp.json();
         const lrc = lyricData?.lrc?.lyric;
         if (isUsableLyrics(lrc, true)) {
-          return { success: true, synced: true, lyrics: lrc, source: 'Netease' };
+          const res = { success: true, synced: true, lyrics: lrc, source: 'Netease' };
+          const tlyric = lyricData?.tlyric?.lyric;
+          const romalrc = lyricData?.romalrc?.lyric;
+          if (tlyric && typeof tlyric === 'string' && tlyric.trim()) {
+            res.rawTranslationLrc = tlyric;
+            const parsedTrans = parseLRC(tlyric);
+            if (parsedTrans.length > 0) {
+              res.translations = parsedTrans;
+            }
+          }
+          if (romalrc && typeof romalrc === 'string' && romalrc.trim()) {
+            res.rawRomajiLrc = romalrc;
+            res.romalrc = romalrc;
+            const parsedRoma = parseLRC(romalrc);
+            if (parsedRoma.length > 0) {
+              res.romajiLyrics = parsedRoma;
+            }
+          }
+          return res;
         }
       } catch (e) {
         continue; // One failed/timed-out candidate should not abort the remaining candidates
@@ -959,9 +1058,14 @@ async function fetchFromKugou(query, targetTitle, targetArtist, targetDuration, 
         const downData = await downResp.json();
         if (!downData?.content) continue;
 
-        const binaryStr = atob(downData.content);
-        const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
-        const decodedLrc = new TextDecoder('utf-8').decode(bytes);
+        let decodedLrc = '';
+        try {
+          const binaryStr = atob(downData.content);
+          const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+          decodedLrc = new TextDecoder('utf-8').decode(bytes);
+        } catch (decodeErr) {
+          continue;
+        }
 
         if (isUsableLyrics(decodedLrc, true)) {
           return { success: true, synced: true, lyrics: decodedLrc, source: 'Kugou' };
@@ -1092,7 +1196,7 @@ async function handleTranslateLyrics(lines, cacheKey) {
     const finalTranslations = lines.map((_, idx) => translatedLines[idx] || '');
 
     if (cacheKey) {
-      translationCache.set(cacheKey, finalTranslations);
+      setBoundedCache(translationCache, cacheKey, finalTranslations);
     }
 
     return { success: true, translations: finalTranslations };
@@ -1208,12 +1312,24 @@ async function handleFetchCandidateLyrics(candidate) {
       if (resp.ok) {
         const data = await resp.json();
         const lrc = data?.lrc?.lyric;
-        return {
+        const res = {
           success: Boolean(lrc),
           lyrics: lrc || '',
           synced: Boolean(lrc && /\[\d{2}:\d{2}/.test(lrc)),
           source: 'NetEase'
         };
+        const tlyric = data?.tlyric?.lyric;
+        const romalrc = data?.romalrc?.lyric;
+        if (tlyric && typeof tlyric === 'string' && tlyric.trim()) {
+          res.rawTranslationLrc = tlyric;
+          const parsedTrans = parseLRC(tlyric);
+          if (parsedTrans.length > 0) res.translations = parsedTrans;
+        }
+        if (romalrc && typeof romalrc === 'string' && romalrc.trim()) {
+          res.rawRomajiLrc = romalrc;
+          res.romalrc = romalrc;
+        }
+        return res;
       }
     } catch (e) {
       console.warn('[Background] NetEase candidate fetch error:', e);

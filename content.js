@@ -72,7 +72,37 @@
   let userScrolled = false;
   let userScrollTimeout = null;
   let lastObservedTime = -1;
-  let lyricsCache = new Map();
+
+  // Video element caching to eliminate repeated document.querySelector calls
+  let cachedVideoElem = null;
+  function getVideoElement() {
+    if (!cachedVideoElem || !cachedVideoElem.isConnected) {
+      cachedVideoElem = document.querySelector('video');
+    }
+    return cachedVideoElem;
+  }
+
+  // LRU Lyrics Cache with 50-entry cap
+  const MAX_LYRICS_CACHE_SIZE = 50;
+  class LRULyricsCache extends Map {
+    set(key, value) {
+      if (this.has(key)) {
+        this.delete(key);
+      } else if (this.size >= MAX_LYRICS_CACHE_SIZE) {
+        const oldestKey = this.keys().next().value;
+        this.delete(oldestKey);
+      }
+      return super.set(key, value);
+    }
+    get(key) {
+      if (!this.has(key)) return undefined;
+      const value = super.get(key);
+      this.delete(key);
+      super.set(key, value);
+      return value;
+    }
+  }
+  let lyricsCache = new LRULyricsCache();
 
   // --- Extension Context Safety Guard ---
   function isExtensionValid() {
@@ -207,6 +237,8 @@
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     try {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (!request || !request.action) return false;
+
         if (request.action === 'GET_STATUS' || request.action === 'GET_TRACK_INFO') {
           const metadata = getCurrentTrackInfo();
           sendResponse({
@@ -218,13 +250,15 @@
             lineCount: currentLyrics.lines ? currentLyrics.lines.length : 0,
             settings: settings
           });
+          return false;
         } else if (request.action === 'SET_OFFSET') {
           settings.syncOffset = request.offset;
           saveSetting('syncOffset', settings.syncOffset);
           updateHeaderUI();
           sendResponse({ success: true, offset: settings.syncOffset });
+          return false;
         }
-        return true;
+        return false;
       });
     } catch (e) {}
   }
@@ -267,10 +301,25 @@
   }
 
   function adjustTrackOffset(deltaMs) {
+    if (!currentTrackKey) {
+      const track = getCurrentTrackInfo();
+      currentTrackKey = `${track.cleanTitle}__${track.cleanArtist}`.toLowerCase();
+    }
     if (!currentTrackKey) return;
     const currentEff = getEffectiveOffset();
     const newOffset = currentEff + deltaMs;
     setTrackOffset(newOffset);
+  }
+
+  function nudgeAudioSync(deltaMs) {
+    adjustTrackOffset(deltaMs);
+    const current = getEffectiveOffset();
+    const sign = current > 0 ? '+' : '';
+    const disp = document.getElementById('lyris-foot-sync-val');
+    if (disp) disp.textContent = `${sign}${(current / 1000).toFixed(1)}s`;
+    const rst = document.getElementById('lyris-foot-sync-reset');
+    if (rst) rst.style.display = current !== 0 ? 'inline-block' : 'none';
+    showToast(`Audio sync: ${sign}${(current / 1000).toFixed(1)}s`);
   }
 
   function setTrackOffset(newOffsetMs) {
@@ -719,6 +768,7 @@
       this.artworkImg.crossOrigin = 'anonymous';
       this.lastDrawTime = 0;
       this.lastDrawnKey = '';
+      this.lastRenderedVideoTime = -1;
     }
 
     preloadArtwork(src) {
@@ -829,15 +879,20 @@
     startRenderLoop() {
       const loop = (timestamp) => {
         if (settings.ambientEnabled && timestamp - this.lastDrawTime >= 33) {
-          this.lastDrawTime = timestamp;
-          this.drawFrame();
+          const video = getVideoElement();
+          const isSongVideo = video && document.querySelector('#song-video')?.offsetParent !== null;
+          // If source is a video and video is paused, do NOT redraw
+          if (!(isSongVideo && video.paused)) {
+            this.lastDrawTime = timestamp;
+            this.drawFrame();
+          }
         }
         requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
     }
 
-    renderEdgeSpread(sourceCanvas, ctx, targetW, targetH, spreadVal, blurVal) {
+    renderEdgeSpread(sourceCanvas, ctx, targetW, targetH, spreadVal, blurVal, cachedPlayerRect = null) {
       if (!sourceCanvas || !ctx || targetW <= 0 || targetH <= 0) return;
 
       const sw = sourceCanvas.width;
@@ -849,11 +904,14 @@
       const spreadNum = (typeof spreadVal === 'number' && isFinite(spreadVal)) ? spreadVal : 42;
       const spreadRatio = spreadNum / 100.0;
 
-      // 1. Calculate player container dimensions
-      const playerContainer = document.querySelector('ytmusic-player#player') ||
-                              document.querySelector('#song-video') ||
-                              document.querySelector('ytmusic-player-page#player-page #main-panel');
-      const pRect = playerContainer ? playerContainer.getBoundingClientRect() : null;
+      // 1. Calculate player container dimensions (measured once per frame from drawFrame)
+      let pRect = cachedPlayerRect;
+      if (!pRect) {
+        const playerContainer = document.querySelector('ytmusic-player#player') ||
+                                document.querySelector('#song-video') ||
+                                document.querySelector('ytmusic-player-page#player-page #main-panel');
+        pRect = playerContainer ? playerContainer.getBoundingClientRect() : null;
+      }
       const pWidth = (pRect && pRect.width > 0) ? pRect.width : 1600;
       const pHeight = (pRect && pRect.height > 0) ? pRect.height : 900;
       const pAspect = pWidth / pHeight;
@@ -905,13 +963,17 @@
       const dx = Math.max(2, Math.round(sw * 0.04));
       const dy = Math.max(2, Math.round(sh * 0.04));
 
-      // 7. High-density edge count: fine, dense bands (30 to 80 bands)
-      const numBands = Math.max(30, Math.min(80, Math.round(spreadNum * 0.45) + 16));
+      // 7. Optimized stepped edge count (8 to 12 bands with smooth alpha falloff)
+      const numBands = Math.max(8, Math.min(12, Math.round(spreadNum * 0.08) + 6));
 
       // 8. Draw concentric bands from outer to inner
       for (let k = numBands; k >= 1; k--) {
         const t = k / numBands;
         const prevT = (k - 1) / numBands;
+
+        // Smooth alpha falloff towards the outer perimeter
+        const bandAlpha = Math.max(0.45, Math.min(1.0, 1.0 - (t * 0.35)));
+        ctx.globalAlpha = bandAlpha;
 
         const bx1 = Math.round(vx - vx * t);
         const by1 = Math.round(vy - vy * t);
@@ -961,6 +1023,7 @@
         }
       }
 
+      ctx.globalAlpha = 1.0;
       // Draw original video / album art in center
       ctx.drawImage(sourceCanvas, 0, 0, sw, sh, vx, vy, vw, vh);
     }
@@ -988,6 +1051,14 @@
       const source = this.getEffectiveSource();
       if (!source) return;
 
+      // Video pause & progression optimization: skip redrawing if paused or frame has not progressed
+      if (!force && source.type === 'video') {
+        const v = source.element;
+        if (v && (v.paused || v.currentTime === this.lastRenderedVideoTime)) {
+          return;
+        }
+      }
+
       // Static Artwork optimization: do not redraw 30fps if static image and spread/blur haven't changed
       if (!force && source.type === 'image') {
         const key = `${source.element.src || source.element.currentSrc}_${settings.ambientSpread}_${settings.ambientBlur}`;
@@ -1012,6 +1083,7 @@
             this.bufferCtx.drawImage(v, 0, 0, bw, bh);
             drawn = true;
             this.lastDrawnKey = 'video';
+            this.lastRenderedVideoTime = v.currentTime;
           }
         } else if (source.type === 'image') {
           // Draw Album Artwork directly (100% vibrant, full coverage, zero distortion)
@@ -1040,18 +1112,25 @@
         }
         // Fallback: try video if valid
         if (!drawn) {
-          const v = document.querySelector('video');
+          const v = getVideoElement();
           if (v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
             try {
               this.bufferCtx.drawImage(v, 0, 0, this.bufferCanvas.width, this.bufferCanvas.height);
               drawn = true;
               this.lastDrawnKey = 'video';
+              this.lastRenderedVideoTime = v.currentTime;
             } catch (err) {}
           }
         }
       }
 
       if (!drawn) return;
+
+      // Cache player container rect once per frame so renderEdgeSpread avoids repeated DOM layout measurements
+      const playerContainer = document.querySelector('ytmusic-player#player') ||
+                              document.querySelector('#song-video') ||
+                              document.querySelector('ytmusic-player-page#player-page #main-panel');
+      const cachedPlayerRect = playerContainer ? playerContainer.getBoundingClientRect() : null;
 
       // Project onto all 3 graduated layers using perimeter edge-spread projection
       for (const layer of this.layers) {
@@ -1062,7 +1141,8 @@
             layer.cvs.width,
             layer.cvs.height,
             settings.ambientSpread,
-            settings.ambientBlur
+            settings.ambientBlur,
+            cachedPlayerRect
           );
         }
       }
@@ -1776,6 +1856,11 @@
         </button>
         <div id="lyris-quick-drawer">
           <button id="lyris-quick-translate" type="button" aria-pressed="false">Translate</button>
+          <div class="lyris-quick-separator" aria-hidden="true"></div>
+          <div class="lyris-quick-sync-group" role="group" aria-label="Quick audio sync adjustment">
+            <button id="lyris-quick-sync-minus" class="lyris-quick-script-btn lyris-quick-sync-btn" type="button" title="Nudge audio sync earlier (-0.5s)">-0.5s</button>
+            <button id="lyris-quick-sync-plus" class="lyris-quick-script-btn lyris-quick-sync-btn" type="button" title="Nudge audio sync later (+0.5s)">+0.5s</button>
+          </div>
           <div class="lyris-quick-separator" aria-hidden="true"></div>
           <div class="lyris-quick-script-group" role="radiogroup" aria-label="Japanese script mode">
             <button class="lyris-quick-script-btn" data-mode="furigana" type="button" role="radio" aria-checked="false">振</button>

@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.sync.get(DEFAULT_SETTINGS, (stored) => {
     if (stored) {
       settings = { ...DEFAULT_SETTINGS, ...stored };
-      updateUI();
+      applySettingsToUI();
     }
   });
 
@@ -126,9 +126,9 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync') {
         for (let key in changes) {
-          settings[key] = changes[key].newValue;
+          settings[key] = changes[key].newValue !== undefined ? changes[key].newValue : DEFAULT_SETTINGS[key];
         }
-        updateUI();
+        applySettingsToUI();
       }
     });
   }
@@ -147,47 +147,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function updateUI() {
+  function saveSettings(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    Object.keys(obj).forEach(key => {
+      save(key, obj[key]);
+    });
+  }
+
+  function applySettingsToUI() {
+    const highlightSelect = document.getElementById('highlightStyle');
+    if (highlightSelect) highlightSelect.value = settings.highlightStyle || 'apple-glow';
+
     // Lyrics
-    lyricsEnabledToggle.checked = settings.lyricsEnabled !== false;
-    japaneseModeSelect.value = settings.japaneseMode || (settings.furiganaEnabled ? 'furigana' : 'original');
-    showOriginalToggle.checked = settings.showOriginal !== false;
-    fontSizeSlider.value = settings.fontSize || 40;
-    fontSizeVal.textContent = `${settings.fontSize || 40}px`;
-    wordHighlightToggle.checked = settings.wordHighlight !== false;
-    clickToSeekToggle.checked = settings.clickToSeek !== false;
-    translationEnabledToggle.checked = !!settings.translationEnabled;
+    if (lyricsEnabledToggle) lyricsEnabledToggle.checked = settings.lyricsEnabled !== false;
+    if (japaneseModeSelect) japaneseModeSelect.value = settings.japaneseMode || (settings.furiganaEnabled ? 'furigana' : 'original');
+    if (showOriginalToggle) showOriginalToggle.checked = settings.showOriginal !== false;
+    if (fontSizeSlider) fontSizeSlider.value = settings.fontSize || 40;
+    if (fontSizeVal) fontSizeVal.textContent = `${settings.fontSize || 40}px`;
+    if (wordHighlightToggle) wordHighlightToggle.checked = settings.wordHighlight !== false;
+    if (clickToSeekToggle) clickToSeekToggle.checked = settings.clickToSeek !== false;
+    if (translationEnabledToggle) translationEnabledToggle.checked = !!settings.translationEnabled;
 
     const offset = settings.syncOffset || 0;
-    syncOffsetSlider.value = offset;
-    syncOffsetVal.textContent = `${(offset / 1000).toFixed(1)}s`;
+    if (syncOffsetSlider) syncOffsetSlider.value = offset;
+    if (syncOffsetVal) syncOffsetVal.textContent = `${(offset / 1000).toFixed(1)}s`;
 
     // Light
-    ambientEnabledToggle.checked = settings.ambientEnabled !== false;
+    if (ambientEnabledToggle) ambientEnabledToggle.checked = settings.ambientEnabled !== false;
     const brightness = (typeof settings.ambientBrightness === 'number') ? settings.ambientBrightness : (settings.ambientIntensity ?? 95);
-    ambientBrightnessSlider.value = brightness;
-    ambientBrightnessVal.textContent = `${brightness}%`;
+    if (ambientBrightnessSlider) ambientBrightnessSlider.value = brightness;
+    if (ambientBrightnessVal) ambientBrightnessVal.textContent = `${brightness}%`;
 
     const blur = (typeof settings.ambientBlur === 'number') ? settings.ambientBlur : 70;
-    ambientBlurSlider.value = blur;
-    ambientBlurVal.textContent = `${blur}px`;
+    if (ambientBlurSlider) ambientBlurSlider.value = blur;
+    if (ambientBlurVal) ambientBlurVal.textContent = `${blur}px`;
 
     const spread = (typeof settings.ambientSpread === 'number') ? settings.ambientSpread : 42;
-    ambientSpreadSlider.value = spread;
-    ambientSpreadVal.textContent = `${spread}%`;
+    if (ambientSpreadSlider) ambientSpreadSlider.value = spread;
+    if (ambientSpreadVal) ambientSpreadVal.textContent = `${spread}%`;
 
     const fade = (typeof settings.ambientFadeDuration === 'number') ? settings.ambientFadeDuration : 0.15;
-    ambientFadeSlider.value = fade;
-    ambientFadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
+    if (ambientFadeSlider) ambientFadeSlider.value = fade;
+    if (ambientFadeVal) ambientFadeVal.textContent = fade === 0 ? 'Off' : `${Number(fade).toFixed(2)}s`;
 
     const sat = (typeof settings.ambientSaturation === 'number') ? settings.ambientSaturation : 120;
-    ambientSaturationSlider.value = sat;
-    ambientSaturationVal.textContent = `${sat}%`;
+    if (ambientSaturationSlider) ambientSaturationSlider.value = sat;
+    if (ambientSaturationVal) ambientSaturationVal.textContent = `${sat}%`;
 
     renderProviders();
   }
 
+  const updateUI = applySettingsToUI;
+
   function renderProviders() {
+    if (!providerListContainer) return;
     providerListContainer.innerHTML = '';
     const order = settings.providerOrder ? [...settings.providerOrder] : [...DEFAULT_SETTINGS.providerOrder];
     const enabled = settings.enabledProviders ? { ...settings.enabledProviders } : { ...DEFAULT_SETTINGS.enabledProviders };
@@ -261,189 +274,240 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Event Listeners - Lyrics
-  lyricsEnabledToggle.addEventListener('change', () => {
-    save('lyricsEnabled', lyricsEnabledToggle.checked);
-    save('appleMode', lyricsEnabledToggle.checked);
-  });
+  if (lyricsEnabledToggle) {
+    lyricsEnabledToggle.addEventListener('change', () => {
+      save('lyricsEnabled', lyricsEnabledToggle.checked);
+      save('appleMode', lyricsEnabledToggle.checked);
+    });
+  }
 
-  japaneseModeSelect.addEventListener('change', () => {
-    const val = japaneseModeSelect.value;
-    save('japaneseMode', val);
-    save('furiganaEnabled', val === 'furigana');
-  });
+  if (japaneseModeSelect) {
+    japaneseModeSelect.addEventListener('change', () => {
+      const val = japaneseModeSelect.value;
+      save('japaneseMode', val);
+      save('furiganaEnabled', val === 'furigana');
+    });
+  }
 
-  showOriginalToggle.addEventListener('change', () => {
-    save('showOriginal', showOriginalToggle.checked);
-  });
+  if (showOriginalToggle) {
+    showOriginalToggle.addEventListener('change', () => {
+      save('showOriginal', showOriginalToggle.checked);
+    });
+  }
 
-  fontSizeSlider.addEventListener('input', () => {
-    const val = parseInt(fontSizeSlider.value, 10);
-    fontSizeVal.textContent = `${val}px`;
-    save('fontSize', val, 250);
-  });
-  fontSizeSlider.addEventListener('change', () => {
-    const val = parseInt(fontSizeSlider.value, 10);
-    save('fontSize', val, 0);
-  });
+  if (fontSizeSlider) {
+    fontSizeSlider.addEventListener('input', () => {
+      const val = parseInt(fontSizeSlider.value, 10);
+      if (fontSizeVal) fontSizeVal.textContent = `${val}px`;
+      save('fontSize', val, 250);
+    });
+    fontSizeSlider.addEventListener('change', () => {
+      const val = parseInt(fontSizeSlider.value, 10);
+      save('fontSize', val, 0);
+    });
+  }
 
-  wordHighlightToggle.addEventListener('change', () => {
-    save('wordHighlight', wordHighlightToggle.checked);
-  });
+  if (wordHighlightToggle) {
+    wordHighlightToggle.addEventListener('change', () => {
+      save('wordHighlight', wordHighlightToggle.checked);
+    });
+  }
 
-  clickToSeekToggle.addEventListener('change', () => {
-    save('clickToSeek', clickToSeekToggle.checked);
-  });
+  const highlightSelect = document.getElementById('highlightStyle');
+  if (highlightSelect) {
+    highlightSelect.addEventListener('change', (e) => {
+      saveSettings({ highlightStyle: e.target.value });
+    });
+  }
 
-  translationEnabledToggle.addEventListener('change', () => {
-    save('translationEnabled', translationEnabledToggle.checked);
-  });
+  if (clickToSeekToggle) {
+    clickToSeekToggle.addEventListener('change', () => {
+      save('clickToSeek', clickToSeekToggle.checked);
+    });
+  }
 
-  syncOffsetSlider.addEventListener('input', () => {
-    const val = parseInt(syncOffsetSlider.value, 10);
-    syncOffsetVal.textContent = `${(val / 1000).toFixed(1)}s`;
-    save('syncOffset', val, 250);
-  });
-  syncOffsetSlider.addEventListener('change', () => {
-    const val = parseInt(syncOffsetSlider.value, 10);
-    save('syncOffset', val, 0);
-  });
+  if (translationEnabledToggle) {
+    translationEnabledToggle.addEventListener('change', () => {
+      save('translationEnabled', translationEnabledToggle.checked);
+    });
+  }
 
-  btnOffsetMinus.addEventListener('click', () => {
-    let cur = parseInt(syncOffsetSlider.value, 10) - 100;
-    if (cur < -2500) cur = -2500;
-    syncOffsetSlider.value = cur;
-    syncOffsetVal.textContent = `${(cur / 1000).toFixed(1)}s`;
-    save('syncOffset', cur);
-  });
+  if (syncOffsetSlider) {
+    syncOffsetSlider.addEventListener('input', () => {
+      const val = parseInt(syncOffsetSlider.value, 10);
+      if (syncOffsetVal) syncOffsetVal.textContent = `${(val / 1000).toFixed(1)}s`;
+      save('syncOffset', val, 250);
+    });
+    syncOffsetSlider.addEventListener('change', () => {
+      const val = parseInt(syncOffsetSlider.value, 10);
+      save('syncOffset', val, 0);
+    });
+  }
 
-  btnOffsetPlus.addEventListener('click', () => {
-    let cur = parseInt(syncOffsetSlider.value, 10) + 100;
-    if (cur > 2500) cur = 2500;
-    syncOffsetSlider.value = cur;
-    syncOffsetVal.textContent = `${(cur / 1000).toFixed(1)}s`;
-    save('syncOffset', cur);
-  });
+  if (btnOffsetMinus) {
+    btnOffsetMinus.addEventListener('click', () => {
+      let cur = parseInt(syncOffsetSlider ? syncOffsetSlider.value : 0, 10) - 100;
+      if (cur < -2500) cur = -2500;
+      if (syncOffsetSlider) syncOffsetSlider.value = cur;
+      if (syncOffsetVal) syncOffsetVal.textContent = `${(cur / 1000).toFixed(1)}s`;
+      save('syncOffset', cur);
+    });
+  }
 
-  btnOffsetReset.addEventListener('click', () => {
-    syncOffsetSlider.value = 0;
-    syncOffsetVal.textContent = '0.0s';
-    save('syncOffset', 0);
-  });
+  if (btnOffsetPlus) {
+    btnOffsetPlus.addEventListener('click', () => {
+      let cur = parseInt(syncOffsetSlider ? syncOffsetSlider.value : 0, 10) + 100;
+      if (cur > 2500) cur = 2500;
+      if (syncOffsetSlider) syncOffsetSlider.value = cur;
+      if (syncOffsetVal) syncOffsetVal.textContent = `${(cur / 1000).toFixed(1)}s`;
+      save('syncOffset', cur);
+    });
+  }
+
+  if (btnOffsetReset) {
+    btnOffsetReset.addEventListener('click', () => {
+      if (syncOffsetSlider) syncOffsetSlider.value = 0;
+      if (syncOffsetVal) syncOffsetVal.textContent = '0.0s';
+      save('syncOffset', 0);
+    });
+  }
 
   // Event Listeners - Light
-  ambientEnabledToggle.addEventListener('change', () => {
-    save('ambientEnabled', ambientEnabledToggle.checked);
-  });
+  if (ambientEnabledToggle) {
+    ambientEnabledToggle.addEventListener('change', () => {
+      save('ambientEnabled', ambientEnabledToggle.checked);
+    });
+  }
 
-  ambientBrightnessSlider.addEventListener('input', () => {
-    const val = parseInt(ambientBrightnessSlider.value, 10);
-    ambientBrightnessVal.textContent = `${val}%`;
-    save('ambientBrightness', val, 250);
-  });
-  ambientBrightnessSlider.addEventListener('change', () => {
-    const val = parseInt(ambientBrightnessSlider.value, 10);
-    save('ambientBrightness', val, 0);
-  });
+  if (ambientBrightnessSlider) {
+    ambientBrightnessSlider.addEventListener('input', () => {
+      const val = parseInt(ambientBrightnessSlider.value, 10);
+      if (ambientBrightnessVal) ambientBrightnessVal.textContent = `${val}%`;
+      save('ambientBrightness', val, 250);
+    });
+    ambientBrightnessSlider.addEventListener('change', () => {
+      const val = parseInt(ambientBrightnessSlider.value, 10);
+      save('ambientBrightness', val, 0);
+    });
+  }
 
-  ambientBlurSlider.addEventListener('input', () => {
-    const val = parseInt(ambientBlurSlider.value, 10);
-    ambientBlurVal.textContent = `${val}px`;
-    save('ambientBlur', val, 250);
-  });
-  ambientBlurSlider.addEventListener('change', () => {
-    const val = parseInt(ambientBlurSlider.value, 10);
-    save('ambientBlur', val, 0);
-  });
+  if (ambientBlurSlider) {
+    ambientBlurSlider.addEventListener('input', () => {
+      const val = parseInt(ambientBlurSlider.value, 10);
+      if (ambientBlurVal) ambientBlurVal.textContent = `${val}px`;
+      save('ambientBlur', val, 250);
+    });
+    ambientBlurSlider.addEventListener('change', () => {
+      const val = parseInt(ambientBlurSlider.value, 10);
+      save('ambientBlur', val, 0);
+    });
+  }
 
-  ambientSpreadSlider.addEventListener('input', () => {
-    const val = parseInt(ambientSpreadSlider.value, 10);
-    ambientSpreadVal.textContent = `${val}%`;
-    save('ambientSpread', val, 250);
-  });
-  ambientSpreadSlider.addEventListener('change', () => {
-    const val = parseInt(ambientSpreadSlider.value, 10);
-    save('ambientSpread', val, 0);
-  });
+  if (ambientSpreadSlider) {
+    ambientSpreadSlider.addEventListener('input', () => {
+      const val = parseInt(ambientSpreadSlider.value, 10);
+      if (ambientSpreadVal) ambientSpreadVal.textContent = `${val}%`;
+      save('ambientSpread', val, 250);
+    });
+    ambientSpreadSlider.addEventListener('change', () => {
+      const val = parseInt(ambientSpreadSlider.value, 10);
+      save('ambientSpread', val, 0);
+    });
+  }
 
-  ambientFadeSlider.addEventListener('input', () => {
-    const val = parseFloat(ambientFadeSlider.value);
-    ambientFadeVal.textContent = val === 0 ? 'Off' : `${val.toFixed(2)}s`;
-    save('ambientFadeDuration', val, 250);
-  });
-  ambientFadeSlider.addEventListener('change', () => {
-    const val = parseFloat(ambientFadeSlider.value);
-    save('ambientFadeDuration', val, 0);
-  });
+  if (ambientFadeSlider) {
+    ambientFadeSlider.addEventListener('input', () => {
+      const val = parseFloat(ambientFadeSlider.value);
+      if (ambientFadeVal) ambientFadeVal.textContent = val === 0 ? 'Off' : `${val.toFixed(2)}s`;
+      save('ambientFadeDuration', val, 250);
+    });
+    ambientFadeSlider.addEventListener('change', () => {
+      const val = parseFloat(ambientFadeSlider.value);
+      save('ambientFadeDuration', val, 0);
+    });
+  }
 
-  ambientSaturationSlider.addEventListener('input', () => {
-    const val = parseInt(ambientSaturationSlider.value, 10);
-    ambientSaturationVal.textContent = `${val}%`;
-    save('ambientSaturation', val, 250);
-  });
-  ambientSaturationSlider.addEventListener('change', () => {
-    const val = parseInt(ambientSaturationSlider.value, 10);
-    save('ambientSaturation', val, 0);
-  });
+  if (ambientSaturationSlider) {
+    ambientSaturationSlider.addEventListener('input', () => {
+      const val = parseInt(ambientSaturationSlider.value, 10);
+      if (ambientSaturationVal) ambientSaturationVal.textContent = `${val}%`;
+      save('ambientSaturation', val, 250);
+    });
+    ambientSaturationSlider.addEventListener('change', () => {
+      const val = parseInt(ambientSaturationSlider.value, 10);
+      save('ambientSaturation', val, 0);
+    });
+  }
 
   // Section Resets
-  btnResetLyrics.addEventListener('click', () => {
-    settings.lyricsEnabled = DEFAULT_SETTINGS.lyricsEnabled;
-    settings.appleMode = DEFAULT_SETTINGS.appleMode;
-    settings.japaneseMode = DEFAULT_SETTINGS.japaneseMode;
-    settings.showOriginal = DEFAULT_SETTINGS.showOriginal;
-    settings.furiganaEnabled = DEFAULT_SETTINGS.furiganaEnabled;
-    settings.fontSize = DEFAULT_SETTINGS.fontSize;
-    settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
-    settings.clickToSeek = DEFAULT_SETTINGS.clickToSeek;
-    settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
-    settings.syncOffset = DEFAULT_SETTINGS.syncOffset;
+  if (btnResetLyrics) {
+    btnResetLyrics.addEventListener('click', () => {
+      settings.lyricsEnabled = DEFAULT_SETTINGS.lyricsEnabled;
+      settings.appleMode = DEFAULT_SETTINGS.appleMode;
+      settings.highlightStyle = DEFAULT_SETTINGS.highlightStyle;
+      settings.japaneseMode = DEFAULT_SETTINGS.japaneseMode;
+      settings.showOriginal = DEFAULT_SETTINGS.showOriginal;
+      settings.furiganaEnabled = DEFAULT_SETTINGS.furiganaEnabled;
+      settings.fontSize = DEFAULT_SETTINGS.fontSize;
+      settings.wordHighlight = DEFAULT_SETTINGS.wordHighlight;
+      settings.clickToSeek = DEFAULT_SETTINGS.clickToSeek;
+      settings.translationEnabled = DEFAULT_SETTINGS.translationEnabled;
+      settings.syncOffset = DEFAULT_SETTINGS.syncOffset;
 
-    chrome.storage.sync.set({
-      lyricsEnabled: settings.lyricsEnabled,
-      appleMode: settings.appleMode,
-      japaneseMode: settings.japaneseMode,
-      showOriginal: settings.showOriginal,
-      furiganaEnabled: settings.furiganaEnabled,
-      fontSize: settings.fontSize,
-      wordHighlight: settings.wordHighlight,
-      clickToSeek: settings.clickToSeek,
-      translationEnabled: settings.translationEnabled,
-      syncOffset: settings.syncOffset
-    }, updateUI);
-  });
+      chrome.storage.sync.set({
+        lyricsEnabled: settings.lyricsEnabled,
+        appleMode: settings.appleMode,
+        highlightStyle: settings.highlightStyle,
+        japaneseMode: settings.japaneseMode,
+        showOriginal: settings.showOriginal,
+        furiganaEnabled: settings.furiganaEnabled,
+        fontSize: settings.fontSize,
+        wordHighlight: settings.wordHighlight,
+        clickToSeek: settings.clickToSeek,
+        translationEnabled: settings.translationEnabled,
+        syncOffset: settings.syncOffset
+      }, applySettingsToUI);
+    });
+  }
 
-  btnResetAmbient.addEventListener('click', () => {
-    settings.ambientEnabled = DEFAULT_SETTINGS.ambientEnabled;
-    settings.ambientBrightness = DEFAULT_SETTINGS.ambientBrightness;
-    settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
-    settings.ambientSpread = DEFAULT_SETTINGS.ambientSpread;
-    settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
-    settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
+  if (btnResetAmbient) {
+    btnResetAmbient.addEventListener('click', () => {
+      settings.ambientEnabled = DEFAULT_SETTINGS.ambientEnabled;
+      settings.ambientBrightness = DEFAULT_SETTINGS.ambientBrightness;
+      settings.ambientBlur = DEFAULT_SETTINGS.ambientBlur;
+      settings.ambientSpread = DEFAULT_SETTINGS.ambientSpread;
+      settings.ambientFadeDuration = DEFAULT_SETTINGS.ambientFadeDuration;
+      settings.ambientSaturation = DEFAULT_SETTINGS.ambientSaturation;
 
-    chrome.storage.sync.set({
-      ambientEnabled: settings.ambientEnabled,
-      ambientBrightness: settings.ambientBrightness,
-      ambientBlur: settings.ambientBlur,
-      ambientSpread: settings.ambientSpread,
-      ambientFadeDuration: settings.ambientFadeDuration,
-      ambientSaturation: settings.ambientSaturation
-    }, updateUI);
-  });
+      chrome.storage.sync.set({
+        ambientEnabled: settings.ambientEnabled,
+        ambientBrightness: settings.ambientBrightness,
+        ambientBlur: settings.ambientBlur,
+        ambientSpread: settings.ambientSpread,
+        ambientFadeDuration: settings.ambientFadeDuration,
+        ambientSaturation: settings.ambientSaturation
+      }, applySettingsToUI);
+    });
+  }
 
-  btnResetSources.addEventListener('click', () => {
-    settings.providerOrder = [...DEFAULT_SETTINGS.providerOrder];
-    settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
+  if (btnResetSources) {
+    btnResetSources.addEventListener('click', () => {
+      settings.providerOrder = [...DEFAULT_SETTINGS.providerOrder];
+      settings.enabledProviders = { ...DEFAULT_SETTINGS.enabledProviders };
 
-    chrome.storage.sync.set({
-      providerOrder: settings.providerOrder,
-      enabledProviders: settings.enabledProviders
-    }, updateUI);
-  });
+      chrome.storage.sync.set({
+        providerOrder: settings.providerOrder,
+        enabledProviders: settings.enabledProviders
+      }, applySettingsToUI);
+    });
+  }
 
-  btnResetAll.addEventListener('click', () => {
-    settings = { ...DEFAULT_SETTINGS };
-    chrome.storage.sync.set(DEFAULT_SETTINGS, updateUI);
-  });
+  if (btnResetAll) {
+    btnResetAll.addEventListener('click', () => {
+      settings = { ...DEFAULT_SETTINGS };
+      chrome.storage.sync.set(DEFAULT_SETTINGS, applySettingsToUI);
+    });
+  }
 
   // Query Current Track Info from YouTube Music tab
   function updateTrackCard() {
@@ -453,11 +517,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (chrome.runtime.lastError || !res) return;
           const track = res.trackInfo || res.track;
           if (track && track.title) {
-            trackTitle.textContent = track.title;
-            trackArtist.textContent = track.artist || 'Unknown Artist';
-            trackBadge.classList.add('active');
+            if (trackTitle) trackTitle.textContent = track.title;
+            if (trackArtist) trackArtist.textContent = track.artist || 'Unknown Artist';
+            if (trackBadge) trackBadge.classList.add('active');
             const isSynced = res.isSynced || (res.currentLyrics && res.currentLyrics.isSynced);
-            trackBadgeText.textContent = isSynced ? 'Synced' : 'Active';
+            if (trackBadgeText) trackBadgeText.textContent = isSynced ? 'Synced' : 'Active';
           }
         });
       }
