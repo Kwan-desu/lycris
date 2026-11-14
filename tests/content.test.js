@@ -49,6 +49,12 @@ test('tokenizeLineText splits CJK per character and latin per word', () => {
   assert.deepEqual(plain(toks), ['Hi', '君']);
 });
 
+test('tokenizeLineText groups consecutive Katakana words into single tokens', () => {
+  const tokens = api.tokenizeLineText('ノーバイバイ あたしもう');
+  assert.equal(tokens[0], 'ノーバイバイ');
+  assert.equal(tokens[1], ' ');
+});
+
 test('kana conversion: romaji incl. sokuon, long vowel and youon', () => {
   assert.equal(api.kanaToRomaji('きょう'), 'kyou');
   assert.equal(api.kanaToRomaji('がっこう'), 'gakkou');

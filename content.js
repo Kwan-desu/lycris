@@ -3045,6 +3045,17 @@
           continue;
         }
 
+        // Group consecutive Katakana characters (including prolonged sound mark ー \u30fc and middle dot ・ \u30fb) into single word tokens
+        if (/[\u30a0-\u30ff]/.test(ch)) {
+          let kw = '';
+          while (i < len && /[\u30a0-\u30ff]/.test(text[i])) {
+            kw += text[i];
+            i++;
+          }
+          tokens.push(kw);
+          continue;
+        }
+
         // Standalone CJK character
         tokens.push(ch);
         i++;

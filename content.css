@@ -395,6 +395,8 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
 .lyris-word,
 .am-word {
   display: inline-block;
+  margin: 0;
+  padding: 0;
   white-space: nowrap;
   max-width: 100%;
   color: inherit;
@@ -513,18 +515,28 @@ ruby.lyris-ruby,
 ruby.am-ruby,
 .lyris-ruby,
 .am-ruby {
+  display: ruby;
   ruby-align: center;
-  display: inline-block;
+  ruby-position: over;
   white-space: nowrap;
 }
+
 ruby.lyris-ruby rt,
 ruby.am-ruby rt {
+  display: ruby-text;
   font-size: 0.52em;
   font-weight: 500;
   line-height: 1;
   color: rgba(248, 246, 242, 0.75);
   letter-spacing: 0;
   text-shadow: none;
+  user-select: none;
+  text-align: center;
+}
+
+ruby.lyris-ruby rb,
+ruby.am-ruby rb {
+  display: ruby-base;
 }
 
 /* Plain (Untimed) Lyrics */
