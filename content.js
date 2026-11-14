@@ -1452,6 +1452,18 @@
       duration = Math.round(video.duration);
     }
 
+    let videoId = '';
+    try {
+      videoId = new URLSearchParams(window.location.search).get('v') || '';
+      if (!videoId) {
+        const link = document.querySelector('ytmusic-player-bar a[href*="watch?v="]')?.getAttribute('href');
+        if (link) {
+          const m = link.match(/[?&]v=([^&]+)/);
+          if (m) videoId = m[1];
+        }
+      }
+    } catch (_) {}
+
     const decomposed = decomposeTrackInfo(title, artist);
 
     return {
@@ -1462,7 +1474,8 @@
       originalArtist: decomposed.originalArtist,
       album,
       artwork,
-      duration
+      duration,
+      videoId
     };
   }
 
@@ -3476,7 +3489,7 @@
     return null;
   }
 
-  function tryGetCaptionsLyrics() {
+  function tryGetCaptionsLyrics(trackInfo, callback) {
     const video = document.querySelector('video');
     if (video && video.textTracks && video.textTracks.length > 0) {
       const tracks = Array.from(video.textTracks);
@@ -3502,12 +3515,203 @@
           }
           if (lines.length > 0) {
             lines.sort((a, b) => a.time - b.time);
-            return { isSynced: true, lines, plainText: '', source: 'YouTube CC' };
+            const syncResult = { isSynced: true, lines, plainText: '', source: 'YouTube CC' };
+            if (typeof callback === 'function') callback(syncResult);
+            return syncResult;
           }
         }
       }
     }
+
+    if (trackInfo && trackInfo.videoId && typeof safeSendMessage === 'function') {
+      safeSendMessage({ action: 'FETCH_YOUTUBE_CAPTIONS', videoId: trackInfo.videoId }, (res) => {
+        if (res && res.success && res.lines && res.lines.length > 0) {
+          const asyncResult = { isSynced: true, lines: res.lines, plainText: '', source: 'YouTube Captions' };
+          if (typeof callback === 'function') callback(asyncResult);
+        } else {
+          if (typeof callback === 'function') callback(null);
+        }
+      });
+      return null;
+    }
+
+    if (typeof callback === 'function') callback(null);
     return null;
+  }
+
+  function alignPlainLyricsToCaptionTimestamps(plainText, captionLines) {
+    if (!plainText || typeof plainText !== 'string' || !Array.isArray(captionLines) || captionLines.length === 0) {
+      return null;
+    }
+
+    const rawLines = plainText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (rawLines.length === 0) return null;
+
+    function normalizeForMatch(str) {
+      return (str || '')
+        .toLowerCase()
+        .replace(/\[[^\]]*\]/g, ' ')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function computeMatchScore(pNorm, cNorm) {
+      if (!pNorm || !cNorm) return 0;
+      if (pNorm === cNorm) return 1.0;
+      if (pNorm.includes(cNorm)) return cNorm.length / pNorm.length;
+      if (cNorm.includes(pNorm)) return pNorm.length / cNorm.length;
+
+      const pWords = pNorm.split(' ').filter(Boolean);
+      const cWords = cNorm.split(' ').filter(Boolean);
+      if (pWords.length > 0 && cWords.length > 0) {
+        let common = 0;
+        const cMap = {};
+        for (const w of cWords) cMap[w] = (cMap[w] || 0) + 1;
+        for (const w of pWords) {
+          if (cMap[w] > 0) {
+            common++;
+            cMap[w]--;
+          }
+        }
+        const tokenScore = (2 * common) / (pWords.length + cWords.length);
+        if (tokenScore > 0) return tokenScore;
+      }
+
+      if (pNorm.length >= 2 && cNorm.length >= 2) {
+        const bgA = new Map();
+        for (let i = 0; i < pNorm.length - 1; i++) {
+          const g = pNorm.slice(i, i + 2);
+          bgA.set(g, (bgA.get(g) || 0) + 1);
+        }
+        let shared = 0;
+        for (let i = 0; i < cNorm.length - 1; i++) {
+          const g = cNorm.slice(i, i + 2);
+          const count = bgA.get(g) || 0;
+          if (count > 0) {
+            shared++;
+            bgA.set(g, count - 1);
+          }
+        }
+        const total = (pNorm.length - 1) + (cNorm.length - 1);
+        return (2 * shared) / total;
+      }
+
+      return 0;
+    }
+
+    let lastCueIndex = 0;
+    const aligned = [];
+    let matchedCount = 0;
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const lineText = rawLines[i];
+      const pNorm = normalizeForMatch(lineText);
+      let bestScore = 0;
+      let bestCueIndex = -1;
+
+      const windowEnd = Math.min(captionLines.length, lastCueIndex + 25);
+      for (let j = lastCueIndex; j < windowEnd; j++) {
+        const cue = captionLines[j];
+        if (!cue || typeof cue.text !== 'string') continue;
+        const cNorm = normalizeForMatch(cue.text);
+        if (!cNorm) continue;
+
+        const rawScore = computeMatchScore(pNorm, cNorm);
+        if (rawScore >= 0.25) {
+          const distance = j - lastCueIndex;
+          const proximityScore = rawScore - (distance * 0.008);
+          if (proximityScore > bestScore) {
+            bestScore = proximityScore;
+            bestCueIndex = j;
+          }
+        }
+      }
+
+      if (bestCueIndex === -1 && windowEnd < captionLines.length) {
+        for (let j = windowEnd; j < captionLines.length; j++) {
+          const cue = captionLines[j];
+          if (!cue || typeof cue.text !== 'string') continue;
+          const cNorm = normalizeForMatch(cue.text);
+          if (!cNorm) continue;
+
+          const rawScore = computeMatchScore(pNorm, cNorm);
+          if (rawScore >= 0.4 && rawScore > bestScore) {
+            bestScore = rawScore;
+            bestCueIndex = j;
+          }
+        }
+      }
+
+      if (bestCueIndex !== -1 && bestScore >= 0.2) {
+        const cue = captionLines[bestCueIndex];
+        const cueTime = typeof cue.time === 'number' ? cue.time : (typeof cue.startTime === 'number' ? cue.startTime : 0);
+        aligned.push({
+          time: Math.max(0, cueTime),
+          text: lineText,
+          matched: true
+        });
+        lastCueIndex = bestCueIndex + 1;
+        matchedCount++;
+      } else {
+        aligned.push({
+          time: -1,
+          text: lineText,
+          matched: false
+        });
+      }
+    }
+
+    if (matchedCount / rawLines.length <= 0.5) {
+      return null;
+    }
+
+    for (let i = 0; i < aligned.length; i++) {
+      if (aligned[i].matched) continue;
+
+      let prevTime = null;
+      let prevIdx = -1;
+      for (let j = i - 1; j >= 0; j--) {
+        if (aligned[j].matched) {
+          prevTime = aligned[j].time;
+          prevIdx = j;
+          break;
+        }
+      }
+
+      let nextTime = null;
+      let nextIdx = -1;
+      for (let j = i + 1; j < aligned.length; j++) {
+        if (aligned[j].matched) {
+          nextTime = aligned[j].time;
+          nextIdx = j;
+          break;
+        }
+      }
+
+      if (prevTime !== null && nextTime !== null) {
+        const fraction = (i - prevIdx) / (nextIdx - prevIdx);
+        aligned[i].time = Math.round((prevTime + (nextTime - prevTime) * fraction) * 100) / 100;
+      } else if (prevTime !== null) {
+        aligned[i].time = Math.round((prevTime + (i - prevIdx) * 3.0) * 100) / 100;
+      } else if (nextTime !== null) {
+        aligned[i].time = Math.max(0, Math.round((nextTime - (nextIdx - i) * 3.0) * 100) / 100);
+      } else {
+        aligned[i].time = i * 3.0;
+      }
+    }
+
+    for (let i = 1; i < aligned.length; i++) {
+      if (aligned[i].time < aligned[i - 1].time) {
+        aligned[i].time = aligned[i - 1].time;
+      }
+    }
+
+    return aligned.map(item => ({
+      time: item.time,
+      text: item.text
+    }));
   }
 
   let durationRetryCount = 0;
@@ -3630,7 +3834,7 @@
 
     function tryGetLocalLyrics(provider) {
       if (provider === 'youtube-cc') {
-        return tryGetCaptionsLyrics();
+        return tryGetCaptionsLyrics(trackInfo);
       }
       if (provider === 'native') {
         return tryGetNativeLyrics();
@@ -3728,12 +3932,36 @@
 
       const provider = remainingProviders[idx];
       if (provider === 'youtube-cc') {
-        const cc = tryGetCaptionsLyrics();
-        if (cc && cc.lines && cc.lines.length > 0) {
-          isLoadingLyrics = false;
-          currentLyrics = cc;
-          lyricsCache.set(trackKey, currentLyrics);
-          renderCurrentLyricsState();
+        const applyCaptions = (captionsResult) => {
+          if (requestId !== currentFetchRequestId) return;
+          if (captionsResult && captionsResult.lines && captionsResult.lines.length > 0) {
+            if (onlinePlainFallback && onlinePlainFallback.plainText) {
+              const alignedLines = alignPlainLyricsToCaptionTimestamps(onlinePlainFallback.plainText, captionsResult.lines);
+              if (alignedLines && alignedLines.length > 0) {
+                isLoadingLyrics = false;
+                currentLyrics = {
+                  isSynced: true,
+                  lines: alignedLines,
+                  plainText: '',
+                  source: (onlinePlainFallback.source || 'Online') + ' + CC Timestamps'
+                };
+                lyricsCache.set(trackKey, currentLyrics);
+                renderCurrentLyricsState();
+                return;
+              }
+            }
+            isLoadingLyrics = false;
+            currentLyrics = captionsResult;
+            lyricsCache.set(trackKey, currentLyrics);
+            renderCurrentLyricsState();
+            return;
+          }
+          step(idx + 1);
+        };
+
+        const syncCc = tryGetCaptionsLyrics(trackInfo);
+        if (syncCc && syncCc.lines && syncCc.lines.length > 0) {
+          applyCaptions(syncCc);
           return;
         }
 
@@ -3742,20 +3970,18 @@
         if (video && video.textTracks && video.textTracks.length > 0) {
           setTimeout(() => {
             if (requestId !== currentFetchRequestId) return;
-            const retryCc = tryGetCaptionsLyrics();
+            const retryCc = tryGetCaptionsLyrics(trackInfo);
             if (retryCc && retryCc.lines && retryCc.lines.length > 0) {
-              isLoadingLyrics = false;
-              currentLyrics = retryCc;
-              lyricsCache.set(trackKey, currentLyrics);
-              renderCurrentLyricsState();
+              applyCaptions(retryCc);
             } else {
-              step(idx + 1);
+              tryGetCaptionsLyrics(trackInfo, applyCaptions);
             }
           }, 350);
           return;
         }
 
-        step(idx + 1);
+        tryGetCaptionsLyrics(trackInfo, applyCaptions);
+        return;
       } else if (provider === 'native') {
         const nat = tryGetNativeLyrics();
         if (nat) {
@@ -3983,7 +4209,7 @@
       parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
       hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
       containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS,
-      isInstrumentalText, alignTimestampedTranslations
+      isInstrumentalText, alignTimestampedTranslations, alignPlainLyricsToCaptionTimestamps
     });
     return;
   }

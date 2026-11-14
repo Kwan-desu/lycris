@@ -17,6 +17,11 @@ test('cleanVideoFluff removes official video / MV tags', () => {
   assert.equal(bg.cleanVideoFluff('Song Title MV'), 'Song Title');
 });
 
+test('cleanVideoFluff cleans dirty title with romanized part and feat credits', () => {
+  const dirty = 'ムカつく -another story- ) - Mukatsuki -another story- (feat. Takanashi Koma Iwami Manaka & Iwami Manaka)';
+  assert.equal(bg.cleanVideoFluff(dirty), 'ムカつく -another story-');
+});
+
 test('computeTokenSimilarity: identical = 1, unrelated = 0, CJK partial > 0', () => {
   assert.equal(bg.computeTokenSimilarity('Lemon', 'lemon'), 1);
   assert.equal(bg.computeTokenSimilarity('Lemon', 'Pretender'), 0);

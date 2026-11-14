@@ -7,6 +7,13 @@ const lyricsCache = new Map();
 const translationCache = new Map();
 const MAX_CACHE_ENTRIES = 100;
 
+const DEFAULT_SETTINGS = {
+  enabledProviders: ['lrclib', 'netease', 'kugou', 'qq']
+};
+if (typeof globalThis !== 'undefined') {
+  globalThis.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
+}
+
 function setBoundedCache(map, key, value) {
   if (map.has(key)) {
     map.delete(key);
@@ -56,6 +63,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(err => {
         console.error('[Background] Candidate fetch error:', err);
         sendResponse({ success: false, lyrics: '', synced: false });
+      });
+    return true;
+  } else if (request.action === 'FETCH_YOUTUBE_CAPTIONS') {
+    handleFetchYouTubeCaptions(request.videoId)
+      .then(result => sendResponse(result))
+      .catch(err => {
+        console.error('[Background] YouTube captions error:', err);
+        sendResponse({ success: false, error: err.message, lines: [] });
       });
     return true;
   }
@@ -195,14 +210,64 @@ function getPrimaryArtist(artist) {
 
 function cleanVideoFluff(str) {
   if (!str) return '';
-  return str
+  let title = str
     // Bracketed fluff
     .replace(/[\(\[【（［](?:official\s*(?:music\s*)?(?:video|audio|visualizer|lyric\s*video|stream)|music\s*video|mv|visualizer|audio|hd|4k|remaster(?:ed)?|performance|lyric\s*video|lyrics)[\)\]】）］]/gi, '')
     // Trailing unbracketed fluff
     .replace(/\s*(?:[-–—|/]\s*)?(?:official\s*(?:music\s*)?(?:video|audio|visualizer|lyric\s*video|stream)|lyric\s*video|music\s*video|mv|visualizer|audio|hd|4k)\s*$/gi, '')
     // Collaboration / feat tags in title
-    .replace(/[\(\[【（［](?:feat\.|ft\.).*?[\)\]】）］]/gi, '')
-    .replace(/\s*[-–—|/]\s*$/g, '')
+    .replace(/[\(\[【（［](?:feat\.|ft\.).*?[\)\]】）］]/gi, '');
+
+  // Clean orphan/unmatched brackets and parentheses around delimiters
+  title = title.replace(/\s*[\)\]\}\>】）］]\s*(?:[-–—/|]\s*)+/g, ' - ');
+  title = title.replace(/(?:[-–—/|]\s*)+[\(\[\{\<【（［]\s*/g, ' - ');
+
+  // Strip orphan brackets at ends or before delimiters
+  if (!/[-–—~〜]\s*[^-–—~〜]+?\s*[-–—~〜]$/.test(title)) {
+    title = title.replace(/^[\s\)\],.\-_\/|~]+|[\s\(\[,.\-_\/|~]+$/g, '');
+  } else {
+    title = title.replace(/^[\s\)\],.\-_\/|~]+|[\s\(\[,._\/|~]+$/g, '');
+  }
+
+  // Detect duplicate romanized/translated subtitle pattern e.g. "ムカつく -another story- - Mukatsuki -another story-"
+  const delimiterRegex = /\s+[-–—/|]\s+/;
+  if (delimiterRegex.test(title)) {
+    const parts = title.split(delimiterRegex).map(p => p.trim()).filter(Boolean);
+    const extractSubtitle = (s) => {
+      const m = s.match(/(?:[-–—~〜]\s*([^-–—~〜]+?)\s*[-–—~〜]?|\(([^)]+)\)|\[([^\]]+)\])\s*$/i);
+      return m ? (m[1] || m[2] || m[3] || '').trim().toLowerCase() : '';
+    };
+
+    if (parts.length === 2) {
+      const left = parts[0];
+      const right = parts[1];
+      const leftSub = extractSubtitle(left);
+      const rightSub = extractSubtitle(right);
+
+      if (leftSub && rightSub && leftSub === rightSub) {
+        title = left;
+      } else {
+        const leftWords = left.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const rightWords = right.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (leftWords && rightWords && (leftWords === rightWords || left.toLowerCase().includes(right.toLowerCase()) || right.toLowerCase().includes(left.toLowerCase()))) {
+          const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/;
+          if (cjk.test(left)) {
+            title = left;
+          }
+        }
+      }
+    } else if (parts.length === 4) {
+      if (parts[1].toLowerCase() === parts[3].toLowerCase()) {
+        title = `${parts[0]} - ${parts[1]}`;
+      }
+    }
+  }
+
+  if (!/[-–—~〜]\s*[^-–—~〜]+?\s*[-–—~〜]$/.test(title)) {
+    title = title.replace(/\s*[-–—|/]\s*$/g, '');
+  }
+
+  return title
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -248,10 +313,20 @@ function extractTitleAndArtist(rawTitle, rawArtist) {
   // 3. Handle delimiters: " - ", " / ", " | "
   const delimiterRegex = /\s+[-–—/|]\s+/;
   if (delimiterRegex.test(title)) {
-    const parts = title.split(delimiterRegex).map(p => cleanVideoFluff(p.trim())).filter(Boolean);
+    const cleanTrapped = (s) => {
+      let t = cleanVideoFluff(s);
+      if (!/[-–—~〜]\s*[^-–—~〜]+?\s*[-–—~〜]$/.test(t)) {
+        t = t.replace(/^[\s\)\],.\-_\/|~]+|[\s\(\[,.\-_\/|~]+$/g, '').replace(/\s*[-–—|/]\s*$/g, '');
+      } else {
+        t = t.replace(/^[\s\)\],.\-_\/|~]+|[\s\(\[,._\/|~]+$/g, '');
+      }
+      return t.trim();
+    };
+
+    const parts = title.split(delimiterRegex).map(p => cleanTrapped(p)).filter(Boolean);
     if (parts.length >= 2) {
-      const left = parts[0];
-      const right = parts.slice(1).join(' - ');
+      const left = cleanTrapped(parts[0]);
+      const right = cleanTrapped(parts.slice(1).join(' - '));
 
       const leftLower = left.toLowerCase();
       const rightLower = right.toLowerCase();
@@ -259,20 +334,22 @@ function extractTitleAndArtist(rawTitle, rawArtist) {
 
       // If Left matches the known artist -> Left is Artist, Right is Title (Standard YouTube)
       if (artist && (leftLower.includes(artistLower) || artistLower.includes(leftLower))) {
-        return { primaryTitle: cleanVideoFluff(right), partA: cleanVideoFluff(right), partB: null, artist: left, isBilingual: false, inverted: false };
+        return { primaryTitle: right, partA: right, partB: null, artist: left, isBilingual: false, inverted: false };
       }
       // If Right matches the known artist -> Right is Artist, Left is Title (Inverted)
       if (artist && (rightLower.includes(artistLower) || artistLower.includes(rightLower))) {
-        return { primaryTitle: cleanVideoFluff(left), partA: cleanVideoFluff(left), partB: null, artist: right, isBilingual: false, inverted: true };
+        return { primaryTitle: left, partA: left, partB: null, artist: right, isBilingual: false, inverted: true };
       }
 
       // If an artist is ALREADY known from player metadata and neither part matches artist:
       // Both Left and Right are parts of the title (Bilingual / Dual title e.g. "星降る海 - Starry Sea")!
       if (artist) {
+        const cjkRegex = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/;
+        const primary = (cjkRegex.test(left) || !cjkRegex.test(right)) ? left : right;
         return {
-          primaryTitle: title,
-          partA: cleanVideoFluff(left),
-          partB: cleanVideoFluff(right),
+          primaryTitle: primary,
+          partA: left,
+          partB: right,
           artist,
           isBilingual: true,
           inverted: false
@@ -280,7 +357,7 @@ function extractTitleAndArtist(rawTitle, rawArtist) {
       }
 
       // Default YouTube upload convention when NO artist was known: Artist - Title
-      return { primaryTitle: cleanVideoFluff(right), partA: cleanVideoFluff(right), partB: null, artist: left, isBilingual: false, inverted: false };
+      return { primaryTitle: right, partA: right, partB: null, artist: left, isBilingual: false, inverted: false };
     }
   }
 
@@ -428,7 +505,7 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
     }
     add(extracted.partA, extracted.partA, cleanArtist, false, 'Part A Title');
     add(extracted.partB, extracted.partB, cleanArtist, false, 'Part B Title');
-    return queries.slice(0, 5);
+    return queries.slice(0, 6);
   }
 
   // Query 1: Clean Title + Primary Artist
@@ -439,6 +516,22 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
   // Query 2: Clean Title + Full Clean Artist (if distinct from primary)
   if (primaryTitle && cleanArtist && cleanArtist !== primaryArtist) {
     add(`${primaryTitle} ${cleanArtist}`, primaryTitle, cleanArtist, false, 'Title & Clean Artist');
+  }
+
+  // Base title without subtitle/variant tags (e.g. "ムカつく -another story-" -> "ムカつく")
+  const baseTitle = primaryTitle
+    .replace(/\s*[-–—~〜]\s*[^-–—~〜]+?\s*[-–—~〜]\s*$/i, '')
+    .replace(/\s*[-–—/|]\s*.*$/i, '')
+    .replace(/\s*[\(\[][^\)\]]+[\)\]]\s*$/i, '')
+    .trim();
+  if (baseTitle && baseTitle.length >= 1 && baseTitle.toLowerCase() !== primaryTitle.toLowerCase()) {
+    if (primaryArtist) {
+      add(`${baseTitle} ${primaryArtist}`, baseTitle, primaryArtist, false, 'Base Title & Primary Artist');
+    }
+    if (cleanArtist && cleanArtist !== primaryArtist) {
+      add(`${baseTitle} ${cleanArtist}`, baseTitle, cleanArtist, false, 'Base Title & Clean Artist');
+    }
+    add(baseTitle, baseTitle, cleanArtist, false, 'Base Title');
   }
 
   // Query 3: Handling for inverted titles if the source title had delimiters
@@ -469,7 +562,7 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
     add(primaryTitle, primaryTitle, cleanArtist, false, 'Title');
   }
 
-  return queries.slice(0, 5);
+  return queries.slice(0, 6);
 }
 
 // --- Text Similarity Validation & Selection ---
@@ -1358,5 +1451,82 @@ async function handleFetchCandidateLyrics(candidate) {
   }
 
   return { success: false, lyrics: '', synced: false };
+}
+
+async function handleFetchYouTubeCaptions(videoId) {
+  if (!videoId) {
+    return { success: false, error: 'No videoId provided', lines: [] };
+  }
+
+  try {
+    const playerUrl = 'https://music.youtube.com/youtubei/v1/player';
+    const postBody = JSON.stringify({
+      videoId,
+      context: {
+        client: {
+          clientName: 'WEB_REMIX',
+          clientVersion: '1.20231215.01.00'
+        }
+      }
+    });
+
+    const resp = await fetchWithTimeout(playerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: postBody
+    }, 3000);
+
+    if (!resp.ok) {
+      return { success: false, error: `Player request failed with status ${resp.status}`, lines: [] };
+    }
+
+    const data = await resp.json();
+    const captionTracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+    if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
+      return { success: false, error: 'No caption tracks found', lines: [] };
+    }
+
+    // Pick preferred track: match lang ja, en, or first track
+    const preferredTrack =
+      captionTracks.find(t => t.languageCode === 'ja' || t.lang === 'ja' || (t.vssId && t.vssId.endsWith('.ja'))) ||
+      captionTracks.find(t => t.languageCode === 'en' || t.lang === 'en' || (t.vssId && t.vssId.endsWith('.en'))) ||
+      captionTracks[0];
+
+    if (!preferredTrack?.baseUrl) {
+      return { success: false, error: 'Invalid caption track URL', lines: [] };
+    }
+
+    const captionUrl = preferredTrack.baseUrl.includes('fmt=')
+      ? preferredTrack.baseUrl
+      : `${preferredTrack.baseUrl}&fmt=json3`;
+
+    const capResp = await fetchWithTimeout(captionUrl, {}, 3000);
+    if (!capResp.ok) {
+      return { success: false, error: `Captions request failed with status ${capResp.status}`, lines: [] };
+    }
+
+    const capData = await capResp.json();
+    const events = Array.isArray(capData?.events) ? capData.events : [];
+    const lines = [];
+
+    for (const event of events) {
+      if (typeof event.tStartMs !== 'number') continue;
+      const text = Array.isArray(event.segs)
+        ? event.segs.map(s => s?.utf8 || '').join('').replace(/\r?\n/g, ' ').trim()
+        : '';
+      if (text) {
+        lines.push({
+          time: event.tStartMs / 1000,
+          text
+        });
+      }
+    }
+
+    return { success: true, lines };
+  } catch (err) {
+    console.error('[Background] YouTube captions fetch exception:', err);
+    return { success: false, error: err.message, lines: [] };
+  }
 }
 

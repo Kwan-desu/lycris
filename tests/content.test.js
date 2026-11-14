@@ -177,3 +177,23 @@ test('alignTimestampedTranslations skips instrumental lines and aligns by proxim
   assert.equal(lines[2].translation, "Let's try changing tomorrow");
 });
 
+test('alignPlainLyricsToCaptionTimestamps aligns plain lyrics to caption timestamps', () => {
+  const plainText = '君が好きだと叫びたい\n明日を変えてみよう\n凍りついてく時間をとめて';
+  const captionLines = [
+    { time: 12.5, text: '君が好きだと叫びたい' },
+    { time: 18.2, text: '明日を変えてみよう' },
+    { time: 24.1, text: '凍りついてく時間' }
+  ];
+
+  const result = api.alignPlainLyricsToCaptionTimestamps(plainText, captionLines);
+
+  assert.equal(Array.isArray(result), true);
+  assert.equal(result.length, 3);
+  assert.equal(result[0].time, 12.5);
+  assert.equal(result[1].time, 18.2);
+  assert.ok(result[2].time >= 24.0);
+  assert.equal(result[0].text, '君が好きだと叫びたい');
+  assert.equal(result[1].text, '明日を変えてみよう');
+  assert.equal(result[2].text, '凍りついてく時間をとめて');
+});
+

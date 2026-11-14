@@ -28,6 +28,7 @@
   ],
   "host_permissions": [
     "https://music.youtube.com/*",
+    "https://*.youtube.com/*",
     "https://lrclib.net/*",
     "https://*.kugou.com/*",
     "https://*.163.com/*",
