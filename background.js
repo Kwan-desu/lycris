@@ -192,13 +192,16 @@ function cleanArtistName(artist) {
   cleaned = cleaned.replace(/\s*[•·・]\s*.*$/, '');
   // Strip voice actor tags e.g. (cv.Saori Hayami) or (CV: ...)
   cleaned = cleaned.replace(/\s*[\(（]cv[.:\s][^\)）]+[\)）]/gi, '');
+  // Normalize mathematical multiplication symbols (×, ✕, ✖) to space
+  cleaned = cleaned.replace(/\s*[×✕✖]\s*/g, ' ');
   // Strip topic / VEVO / channel suffixes
   cleaned = cleaned
     .replace(/\s*-\s*Topic$/i, '')
     .replace(/\s*VEVO$/i, '')
     .replace(/\s+(?:Official(?:\s+Channel)?|Topic|Records|Music)$/i, '')
+    .replace(/\s+/g, ' ')
     .trim();
-  return cleaned || artist.trim();
+  return cleaned || String(artist).replace(/\s*[×✕✖]\s*/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function getPrimaryArtist(artist) {
@@ -217,6 +220,9 @@ function cleanVideoFluff(str) {
     .replace(/\s*(?:[-–—|/]\s*)?(?:official\s*(?:music\s*)?(?:video|audio|visualizer|lyric\s*video|stream)|lyric\s*video|music\s*video|mv|visualizer|audio|hd|4k)\s*$/gi, '')
     // Collaboration / feat tags in title
     .replace(/[\(\[【（［](?:feat\.|ft\.).*?[\)\]】）］]/gi, '');
+
+  // Normalize mathematical multiplication symbols (×, ✕, ✖) to space
+  title = title.replace(/\s*[×✕✖]\s*/g, ' ');
 
   // Clean orphan/unmatched brackets and parentheses around delimiters
   title = title.replace(/\s*[\)\]\}\>】）］]\s*(?:[-–—/|]\s*)+/g, ' - ');
@@ -456,13 +462,13 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
 
   function add(query, titleVal, artistVal, isCover = false, note = '') {
     if (!query) return;
-    const trimmed = query.replace(/\s+/g, ' ').trim();
+    const trimmed = query.replace(/\s*[×✕✖]\s*/g, ' ').replace(/\s+/g, ' ').trim();
     if (trimmed && trimmed.length >= 2 && !added.has(trimmed.toLowerCase())) {
       added.add(trimmed.toLowerCase());
       queries.push({
         query: trimmed,
-        title: titleVal || '',
-        artist: artistVal || '',
+        title: (titleVal || '').replace(/\s*[×✕✖]\s*/g, ' ').trim(),
+        artist: (artistVal || '').replace(/\s*[×✕✖]\s*/g, ' ').trim(),
         isCover,
         note
       });
@@ -482,6 +488,12 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
     }
     if (decomp.primaryTitle && decomp.coverArtist) {
       add(`${decomp.primaryTitle} ${decomp.coverArtist}`, decomp.primaryTitle, decomp.coverArtist, true, 'Cover Artist');
+      if (/[×✕✖]/.test(rawArtist || '')) {
+        const coverWithX = cleanArtistName(String(rawArtist).replace(/\s*[×✕✖]\s*/g, ' x '));
+        if (coverWithX && coverWithX.toLowerCase() !== (decomp.coverArtist || '').toLowerCase()) {
+          add(`${decomp.primaryTitle} ${coverWithX}`, decomp.primaryTitle, coverWithX, true, 'Cover Artist (x-variant)');
+        }
+      }
     }
     return queries.slice(0, 4);
   }
@@ -516,6 +528,22 @@ function buildSearchQueries(titleOrTrackInfo, artistParam, rawQueryParam) {
   // Query 2: Clean Title + Full Clean Artist (if distinct from primary)
   if (primaryTitle && cleanArtist && cleanArtist !== primaryArtist) {
     add(`${primaryTitle} ${cleanArtist}`, primaryTitle, cleanArtist, false, 'Title & Clean Artist');
+  }
+
+  // x-variant for collaborations with multiplication symbol (e.g. "Hanon × Kotoha" -> "Hanon x Kotoha")
+  const multRegex = /[×✕✖]/;
+  const rawArtistHasMult = multRegex.test(rawArtist || '') || multRegex.test(extracted.artist || '');
+  if (primaryTitle && rawArtistHasMult) {
+    const artistWithX = cleanArtistName((rawArtist || extracted.artist || '').replace(/\s*[×✕✖]\s*/g, ' x '));
+    if (artistWithX && artistWithX.toLowerCase() !== cleanArtist.toLowerCase()) {
+      add(`${primaryTitle} ${artistWithX}`, primaryTitle, artistWithX, false, 'Title & Artist (x-variant)');
+    }
+  }
+  if (primaryArtist && multRegex.test(rawTitle || '')) {
+    const titleWithX = cleanVideoFluff(rawTitle.replace(/\s*[×✕✖]\s*/g, ' x '));
+    if (titleWithX && titleWithX.toLowerCase() !== primaryTitle.toLowerCase()) {
+      add(`${titleWithX} ${primaryArtist}`, titleWithX, primaryArtist, false, 'Title (x-variant) & Artist');
+    }
   }
 
   // Base title without subtitle/variant tags (e.g. "ムカつく -another story-" -> "ムカつく")

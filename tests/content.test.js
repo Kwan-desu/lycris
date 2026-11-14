@@ -197,3 +197,21 @@ test('alignPlainLyricsToCaptionTimestamps aligns plain lyrics to caption timesta
   assert.equal(result[2].text, '凍りついてく時間をとめて');
 });
 
+test('convertJapaneseLine correctly converts contextual readings and compound verbs', () => {
+  const line1 = api.convertJapaneseLine('心躍らせようぜ', 'furigana');
+  const text1 = typeof line1 === 'object' ? line1.text : line1;
+  assert.ok(text1.includes('こころおど'), `Expected こころおど in ${text1}`);
+  assert.ok(!text1.includes('しんやく'), `Did not expect しんやく in ${text1}`);
+
+  const line2 = api.convertJapaneseLine('鳴る方へ', 'furigana');
+  const text2 = typeof line2 === 'object' ? line2.text : line2;
+  assert.ok(text2.includes('ほう'), `Expected ほう in ${text2}`);
+  assert.ok(!text2.includes('かた'), `Did not expect かた in ${text2}`);
+
+  const line3 = api.convertJapaneseLine('弾ませて', 'furigana');
+  const text3 = typeof line3 === 'object' ? line3.text : line3;
+  assert.ok(text3.includes('はず'), `Expected はず in ${text3}`);
+  assert.ok(!text3.includes('ひ'), `Did not expect ひ in ${text3}`);
+});
+
+

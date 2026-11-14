@@ -12,9 +12,23 @@ test('cleanArtistName strips Topic / VEVO / album suffixes', () => {
   assert.equal(bg.cleanArtistName('Aimer • Album • 2021'), 'Aimer');
 });
 
+test('cleanArtistName normalizes mathematical multiplication symbols (×, ✕, ✖) to space', () => {
+  assert.equal(bg.cleanArtistName('Hanon × Kotoha'), 'Hanon Kotoha');
+  assert.equal(bg.cleanArtistName('Hanon ✕ Kotoha'), 'Hanon Kotoha');
+  assert.equal(bg.cleanArtistName('Hanon ✖ Kotoha'), 'Hanon Kotoha');
+  assert.equal(bg.cleanArtistName('Hanon×Kotoha'), 'Hanon Kotoha');
+});
+
 test('cleanVideoFluff removes official video / MV tags', () => {
   assert.equal(bg.cleanVideoFluff('夜に駆ける (Official Music Video)'), '夜に駆ける');
   assert.equal(bg.cleanVideoFluff('Song Title MV'), 'Song Title');
+});
+
+test('cleanVideoFluff normalizes mathematical multiplication symbols (×, ✕, ✖) to space', () => {
+  assert.equal(bg.cleanVideoFluff('夜に駆ける × 群青'), '夜に駆ける 群青');
+  assert.equal(bg.cleanVideoFluff('SPY×FAMILY (Official Music Video)'), 'SPY FAMILY');
+  assert.equal(bg.cleanVideoFluff('Song ✕ Title'), 'Song Title');
+  assert.equal(bg.cleanVideoFluff('Song ✖ Title'), 'Song Title');
 });
 
 test('cleanVideoFluff cleans dirty title with romanized part and feat credits', () => {
@@ -38,6 +52,14 @@ test('buildSearchQueries yields original-track queries for covers', () => {
 test('buildSearchQueries splits "Artist - Title" uploads', () => {
   const qs = bg.buildSearchQueries({ title: 'YOASOBI - 夜に駆ける (Official Music Video)', artist: 'Ayase / YOASOBI' });
   assert.ok(qs.some(q => q.title === '夜に駆ける'), JSON.stringify(qs));
+});
+
+test('buildSearchQueries normalizes multiplication symbols to space and x query variants', () => {
+  const qs = bg.buildSearchQueries({ title: '恋色花火', artist: 'Hanon × Kotoha' });
+  const queries = qs.map(q => q.query);
+  assert.ok(queries.includes('恋色花火 Hanon Kotoha'), `queries should contain space variant: ${JSON.stringify(queries)}`);
+  assert.ok(queries.includes('恋色花火 Hanon x Kotoha'), `queries should contain x variant: ${JSON.stringify(queries)}`);
+  assert.ok(!queries.some(q => /[×✕✖]/.test(q)), `no query should contain unicode multiplication symbols`);
 });
 
 test('selectBestCandidate prefers synced, rejects wrong-title and wrong-artist candidates', () => {

@@ -340,7 +340,9 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   text-align: left;
   padding: 2px 0;
   flex-shrink: 0;
-  overflow-wrap: anywhere;
+  line-break: strict;
+  word-break: keep-all;
+  overflow-wrap: break-word;
   opacity: 0.38;
   /* filter: blur removed to eliminate dozens of subpixel blur passes */
   transition: color 0.28s ease, opacity 0.28s ease, transform 0.28s ease;
@@ -348,6 +350,16 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
   transform-origin: left center;
   position: relative;
   user-select: text;
+}
+
+.lyris-line,
+.am-lyric-line,
+.lyris-line-inner,
+.am-line-primary,
+.lyris-line-primary {
+  line-break: strict;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .lyris-line:hover,
@@ -383,6 +395,7 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
 .lyris-word,
 .am-word {
   display: inline-block;
+  white-space: nowrap;
   max-width: 100%;
   color: inherit;
   vertical-align: baseline;
@@ -497,8 +510,12 @@ ytmusic-description-shelf-renderer.am-original-view #lyris-lyrics-wrapper {
 
 /* Japanese Ruby Tags */
 ruby.lyris-ruby,
-ruby.am-ruby {
+ruby.am-ruby,
+.lyris-ruby,
+.am-ruby {
   ruby-align: center;
+  display: inline-block;
+  white-space: nowrap;
 }
 ruby.lyris-ruby rt,
 ruby.am-ruby rt {

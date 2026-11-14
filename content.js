@@ -512,6 +512,15 @@
     return res;
   }
 
+  function getContextualKanjiReading(ch, nextChar, isConsecutive, singles, onyomi) {
+    if (ch === '方' && (nextChar === 'へ' || nextChar === 'に')) return 'ほう';
+    if (ch === '弾' && (nextChar === 'ま' || nextChar === 'み' || nextChar === 'む' || nextChar === 'め')) return 'はず';
+    if (isConsecutive) {
+      return onyomi[ch] || singles[ch];
+    }
+    return singles[ch] || onyomi[ch];
+  }
+
   function addFurigana(text) {
     if (!text) return "";
     if (!containsKanji(text)) return escapeHTML(text);
@@ -536,15 +545,17 @@
     }
 
     // Replace single & consecutive Kanji characters with context-aware On'yomi / Kun'yomi
-    safe = safe.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block) => {
+    safe = safe.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block, offset, fullStr) => {
       if (block.length > 1) {
-        return block.split("").map(ch => {
-          const reading = onyomi[ch] || singles[ch];
+        return block.split("").map((ch, idx) => {
+          const nextChar = (idx + 1 < block.length) ? block[idx + 1] : fullStr[offset + block.length];
+          const reading = getContextualKanjiReading(ch, nextChar, true, singles, onyomi);
           if (reading) return `<ruby class="am-ruby"><rb>${ch}</rb><rt>${reading}</rt></ruby>`;
           return ch;
         }).join("");
       } else {
-        const reading = singles[block] || onyomi[block];
+        const nextChar = fullStr[offset + 1];
+        const reading = getContextualKanjiReading(block, nextChar, false, singles, onyomi);
         if (reading) return `<ruby class="am-ruby"><rb>${block}</rb><rt>${reading}</rt></ruby>`;
         return block;
       }
@@ -613,11 +624,15 @@
     if (regex) {
       res = res.replace(regex, m => compounds[m] || m);
     }
-    res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block) => {
+    res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block, offset, fullStr) => {
       if (block.length > 1) {
-        return block.split("").map(ch => onyomi[ch] || singles[ch] || ch).join("");
+        return block.split("").map((ch, idx) => {
+          const nextChar = (idx + 1 < block.length) ? block[idx + 1] : fullStr[offset + block.length];
+          return getContextualKanjiReading(ch, nextChar, true, singles, onyomi) || ch;
+        }).join("");
       } else {
-        return singles[block] || onyomi[block] || block;
+        const nextChar = fullStr[offset + 1];
+        return getContextualKanjiReading(block, nextChar, false, singles, onyomi) || block;
       }
     });
     return katakanaToHiragana(res);
@@ -2969,6 +2984,8 @@
     return result;
   }
 
+  const JAPANESE_PARTICLES = new Set(['へ', 'を', 'に', 'で', 'が', 'は', 'と', 'か', 'の']);
+
   function tokenizeLineText(text) {
     if (!text) return [];
     const compounds = (typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) || {};
@@ -3005,9 +3022,9 @@
 
       // CJK characters (Japanese, Chinese, Korean)
       if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch)) {
-        // Try compound match in dictionary (longest match first from 5 down to 2)
+        // Try compound match in dictionary (longest match first from 8 down to 2)
         let matched = false;
-        const maxSub = Math.min(len - i, 5);
+        const maxSub = Math.min(len - i, 8);
         for (let l = maxSub; l >= 2; l--) {
           const sub = text.slice(i, i + l);
           if (compounds[sub]) {
@@ -3018,6 +3035,15 @@
           }
         }
         if (matched) continue;
+
+        // Kinsoku Shori: attach trailing Japanese particle to preceding ruby token (e.g. 方 + へ -> 方へ)
+        const prev = tokens[tokens.length - 1];
+        const isRuby = prev && ((prev.length === 1 && /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(prev)) || prev.endsWith('</ruby>'));
+        if (JAPANESE_PARTICLES.has(ch) && isRuby) {
+          tokens[tokens.length - 1] += ch;
+          i++;
+          continue;
+        }
 
         // Standalone CJK character
         tokens.push(ch);
