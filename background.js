@@ -1415,12 +1415,16 @@ async function handleTranslateLyrics(lines, cacheKey) {
     }
 
     const data = await resp.json();
-    let translatedLines = [];
-    if (Array.isArray(data) && typeof data[0] === 'string') {
-      translatedLines = data[0].split('\n').map(s => s.trim());
+    let translatedText = '';
+    if (Array.isArray(data) && Array.isArray(data[0]) && typeof data[0][0] === 'string') {
+      translatedText = data[0][0];
+    } else if (Array.isArray(data) && typeof data[0] === 'string') {
+      translatedText = data[0];
     } else if (typeof data === 'string') {
-      translatedLines = data.split('\n').map(s => s.trim());
+      translatedText = data;
     }
+
+    const translatedLines = translatedText ? translatedText.split('\n').map(s => s.trim()) : [];
 
     const finalTranslations = new Array(lines.length).fill('');
     validEntries.forEach((entry, vIdx) => {

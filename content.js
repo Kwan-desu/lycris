@@ -753,14 +753,19 @@
 
   let isTranslatingKey = null;
 
+  function isTranslatableText(text) {
+    if (!text || typeof text !== 'string') return false;
+    return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u0400-\u04ff\u00c0-\u024f]/.test(text) || containsJapanese(text);
+  }
+
   function fetchTranslationForCurrentLyrics() {
     if (!settings.translationEnabled) return;
     // Guard against a duplicate request for the SAME track only; a different track may proceed
     if (isTranslatingKey !== null && isTranslatingKey === currentTrackKey) return;
 
-    const hasJp = (currentLyrics.isSynced && currentLyrics.lines.some(l => containsJapanese(l.text))) ||
-                  (!currentLyrics.isSynced && containsJapanese(currentLyrics.plainText));
-    if (!hasJp) return;
+    const hasTranslatable = (currentLyrics.isSynced && currentLyrics.lines.some(l => isTranslatableText(l.text))) ||
+                            (!currentLyrics.isSynced && isTranslatableText(currentLyrics.plainText));
+    if (!hasTranslatable) return;
 
     let rawLines = [];
     const vocalIndices = [];
@@ -4279,7 +4284,8 @@
       parseLRC, tokenizeLineText, computeWordTimings, kanaToRomaji, textToHiragana,
       hiraganaToKatakana, katakanaToHiragana, convertJapaneseLine, addFurigana,
       containsJapanese, escapeHTML, decomposeTrackInfo, DEFAULT_SETTINGS,
-      isInstrumentalText, alignTimestampedTranslations, alignPlainLyricsToCaptionTimestamps
+      isInstrumentalText, alignTimestampedTranslations, alignPlainLyricsToCaptionTimestamps,
+      isTranslatableText
     });
     return;
   }

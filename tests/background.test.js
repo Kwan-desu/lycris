@@ -135,3 +135,19 @@ test('junk lyric entries (e.g. "[00:00.00]probe") are rejected, real ones kept',
   assert.equal(res.synced, true);
   assert.equal(res.lyrics, real);
 });
+
+test('handleTranslateLyrics parses 2D array returned by Google Translate sl=auto', async () => {
+  const ctx = loadBackground((url) => {
+    url = String(url);
+    if (url.includes('translate_a/t')) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => [["Hello\nWorld", "ja"]]
+      });
+    }
+    return Promise.resolve({ ok: false });
+  });
+  const res = await ctx.handleTranslateLyrics(['こんにちは', '世界']);
+  assert.equal(res.success, true);
+  assert.deepEqual(Array.from(res.translations), ['Hello', 'World']);
+});
