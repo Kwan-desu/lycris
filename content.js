@@ -69,6 +69,7 @@
     source: 'none'
   };
   let activeLineIndex = -1;
+  let previousActiveLineIdx = -1;
   let userScrolled = false;
   let userScrollTimeout = null;
   let lastObservedTime = -1;
@@ -449,16 +450,34 @@
   // JAPANESE KANJI FURIGANA & GOOGLE TRANSLATION ENGINE
   // ==========================================================================
 
-  let compoundRegex = null;
-
-  function getCompoundRegex() {
-    if (!compoundRegex && typeof window !== 'undefined' && window.AM_KANJI_COMPOUNDS) {
-      const keys = Object.keys(window.AM_KANJI_COMPOUNDS).sort((a, b) => b.length - a.length);
-      if (keys.length > 0) {
-        compoundRegex = new RegExp(keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  function replaceCompoundsGreedy(text, compounds, callback) {
+    if (!text || !compounds) return text;
+    let res = "";
+    let i = 0;
+    const len = text.length;
+    while (i < len) {
+      let matched = false;
+      const maxL = Math.min(len - i, 16);
+      for (let l = maxL; l >= 2; l--) {
+        const sub = text.slice(i, i + l);
+        const reading = compounds[sub];
+        if (reading) {
+          res += callback(sub, reading);
+          i += l;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        res += text[i];
+        i++;
       }
     }
-    return compoundRegex;
+    return res;
+  }
+
+  function getCompoundRegex() {
+    return null; // Deprecated: replaced by fast greedy dictionary matching
   }
 
   function containsJapanese(text) {
@@ -530,14 +549,11 @@
     const onyomi = (typeof window !== "undefined" && window.AM_KANJI_ONYOMI) || {};
 
     let safe = escapeHTML(text);
-    const regex = getCompoundRegex();
 
-    // Replace compounds first using unique placeholder markers
+    // Replace compounds first using unique placeholder markers with fast greedy dictionary matching
     const markers = [];
-    if (regex) {
-      safe = safe.replace(regex, (match) => {
-        const reading = compounds[match];
-        if (!reading) return match;
+    if (compounds) {
+      safe = replaceCompoundsGreedy(safe, compounds, (match, reading) => {
         const id = markers.length;
         markers.push(renderFuriganaHtml(match, reading));
         return `\uE000${id}\uE001`;
@@ -619,11 +635,7 @@
     const compounds = (typeof window !== "undefined" && window.AM_KANJI_COMPOUNDS) || {};
     const singles = (typeof window !== "undefined" && window.AM_KANJI_SINGLE) || {};
     const onyomi = (typeof window !== "undefined" && window.AM_KANJI_ONYOMI) || {};
-    let res = text;
-    const regex = getCompoundRegex();
-    if (regex) {
-      res = res.replace(regex, m => compounds[m] || m);
-    }
+    let res = replaceCompoundsGreedy(text, compounds, (m, reading) => reading || m);
     res = res.replace(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g, (block, offset, fullStr) => {
       if (block.length > 1) {
         return block.split("").map((ch, idx) => {
@@ -1521,7 +1533,7 @@
     listContainer.innerHTML = `
       <div class="lyris-state am-loading-state">
         <div class="lyris-spinner am-spinner"></div>
-        <div>
+        <div class="lyris-state-text">
           <h3 class="am-state-title">Finding lyrics…</h3>
           <p class="am-state-desc">${escapeHTML(title || 'Current track')}</p>
         </div>
@@ -2139,21 +2151,6 @@
       resumeBtn.hidden = true;
       resumeBtn.classList.remove('visible');
     }
-  }
-
-  function showToast(message) {
-    let toast = document.getElementById('lyris-toast');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'lyris-toast';
-      document.body.appendChild(toast);
-    }
-    toast.textContent = message;
-    toast.classList.add('visible');
-    clearTimeout(toast._timer);
-    toast._timer = setTimeout(() => {
-      toast.classList.remove('visible');
-    }, 2200);
   }
 
   function injectSearchModal() {
@@ -3107,20 +3104,6 @@
     return tokenTimings;
   }
 
-  function renderLoadingState(title) {
-    const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
-    if (!listContainer) return;
-    listContainer.innerHTML = `
-      <div class="lyris-state am-loading-state">
-        <div class="lyris-spinner am-spinner"></div>
-        <div class="lyris-state-text">
-          <h3>Finding lyrics…</h3>
-          <p>${escapeHTML(title || 'Current track')}</p>
-        </div>
-      </div>
-    `;
-  }
-
   function renderLyricsUI() {
     const listContainer = document.getElementById('lyris-list') || document.getElementById('am-lyrics-list');
     if (!listContainer) return;
@@ -3307,6 +3290,7 @@
     listContainer.appendChild(fragment);
 
     activeLineIndex = -1;
+    previousActiveLineIdx = -1;
     updateActiveLine();
     updateQuickControlsUI();
   }
@@ -3448,36 +3432,77 @@
   }
 
   function setActiveLine(newIndex, shouldScroll = true) {
+    if (newIndex === activeLineIndex && previousActiveLineIdx === newIndex) return;
+    const prevIdx = activeLineIndex;
     activeLineIndex = newIndex;
-    const lines = document.querySelectorAll('.lyris-line[data-index], .am-lyric-line[data-index]');
 
-    lines.forEach((elem) => {
-      const idx = parseInt(elem.dataset.index, 10);
-      const wordSpans = elem.querySelectorAll('.lyris-word, .am-word');
-
-      if (idx === activeLineIndex) {
-        elem.classList.add('current', 'active');
-        elem.classList.remove('past', 'passed');
-      } else if (idx < activeLineIndex) {
-        elem.classList.remove('current', 'active');
-        elem.classList.add('past', 'passed');
-        wordSpans.forEach(w => {
-          w.classList.add('sung');
-          w.classList.remove('live', 'singing');
-          w.style.setProperty('--fill', '100%');
-          w.style.setProperty('--ly-word-fill', '100%');
-          w.style.setProperty('--am-word-fill', '100%');
-        });
-      } else {
-        elem.classList.remove('current', 'active', 'past', 'passed');
-        wordSpans.forEach(w => {
-          w.classList.remove('sung', 'live', 'singing');
-          w.style.setProperty('--fill', '0%');
-          w.style.setProperty('--ly-word-fill', '0%');
-          w.style.setProperty('--am-word-fill', '0%');
-        });
+    if (prevIdx !== -1 && Math.abs(newIndex - prevIdx) === 1) {
+      // O(1) fast path: only transition between previous line and current line
+      const prevElem = document.querySelector(`.lyris-line[data-index="${prevIdx}"], .am-lyric-line[data-index="${prevIdx}"]`);
+      if (prevElem) {
+        prevElem.classList.remove('current', 'active');
+        if (prevIdx < newIndex) {
+          prevElem.classList.add('past', 'passed');
+          const wordSpans = prevElem.querySelectorAll('.lyris-word, .am-word');
+          wordSpans.forEach(w => {
+            w.classList.add('sung');
+            w.classList.remove('live', 'singing');
+            w.style.setProperty('--fill', '100%');
+            w.style.setProperty('--ly-word-fill', '100%');
+            w.style.setProperty('--am-word-fill', '100%');
+          });
+        } else {
+          prevElem.classList.remove('past', 'passed');
+          const wordSpans = prevElem.querySelectorAll('.lyris-word, .am-word');
+          wordSpans.forEach(w => {
+            w.classList.remove('sung', 'live', 'singing');
+            w.style.setProperty('--fill', '0%');
+            w.style.setProperty('--ly-word-fill', '0%');
+            w.style.setProperty('--am-word-fill', '0%');
+          });
+        }
       }
-    });
+
+      if (newIndex >= 0) {
+        const newElem = document.querySelector(`.lyris-line[data-index="${newIndex}"], .am-lyric-line[data-index="${newIndex}"]`);
+        if (newElem) {
+          newElem.classList.add('current', 'active');
+          newElem.classList.remove('past', 'passed');
+        }
+      }
+    } else {
+      // Full sync for initial activation or non-sequential jumps (e.g. user seeking)
+      const lines = document.querySelectorAll('.lyris-line[data-index], .am-lyric-line[data-index]');
+      lines.forEach((elem) => {
+        const idx = parseInt(elem.dataset.index, 10);
+        const wordSpans = elem.querySelectorAll('.lyris-word, .am-word');
+
+        if (idx === activeLineIndex) {
+          elem.classList.add('current', 'active');
+          elem.classList.remove('past', 'passed');
+        } else if (idx < activeLineIndex) {
+          elem.classList.remove('current', 'active');
+          elem.classList.add('past', 'passed');
+          wordSpans.forEach(w => {
+            w.classList.add('sung');
+            w.classList.remove('live', 'singing');
+            w.style.setProperty('--fill', '100%');
+            w.style.setProperty('--ly-word-fill', '100%');
+            w.style.setProperty('--am-word-fill', '100%');
+          });
+        } else {
+          elem.classList.remove('current', 'active', 'past', 'passed');
+          wordSpans.forEach(w => {
+            w.classList.remove('sung', 'live', 'singing');
+            w.style.setProperty('--fill', '0%');
+            w.style.setProperty('--ly-word-fill', '0%');
+            w.style.setProperty('--am-word-fill', '0%');
+          });
+        }
+      });
+    }
+
+    previousActiveLineIdx = newIndex;
 
     if (shouldScroll && !userScrolled && activeLineIndex >= 0) {
       scrollToActiveLine(true);
@@ -3819,6 +3844,7 @@
 
     currentTrackKey = trackKey;
     activeLineIndex = -1;
+    previousActiveLineIdx = -1;
     userScrolled = false;
 
     // Immediately hide the resume sync button on song transition
@@ -4053,9 +4079,10 @@
 
   let lastRafTimestamp = 0;
   function timeSyncLoop() {
+    if (!isExtensionValid()) return;
     lastRafTimestamp = Date.now();
     try {
-      const video = document.querySelector('video');
+      const video = getVideoElement();
       if (video && !video.paused && typeof video.currentTime === 'number' && !isNaN(video.currentTime)) {
         if (Math.abs(video.currentTime - lastObservedTime) > 0.04) {
           lastObservedTime = video.currentTime;
@@ -4065,13 +4092,15 @@
     } catch (err) {
       console.warn('[Lyris] timeSyncLoop error:', err);
     } finally {
-      requestAnimationFrame(timeSyncLoop);
+      if (isExtensionValid()) {
+        requestAnimationFrame(timeSyncLoop);
+      }
     }
   }
 
   let lastBoundVideo = null;
   function bindVideoEvents() {
-    const video = document.querySelector('video');
+    const video = getVideoElement();
     if (video && video !== lastBoundVideo) {
       lastBoundVideo = video;
       video.addEventListener('seeking', () => updateActiveLine());
@@ -4178,7 +4207,11 @@
     });
 
     // 4. Main 500ms consistency watcher
-    setInterval(() => {
+    const watcherInterval = setInterval(() => {
+      if (!isExtensionValid()) {
+        clearInterval(watcherInterval);
+        return;
+      }
       forceEnableNativeLyricsTab();
       hideNativeLyricsUnavailableMessage();
       bindVideoEvents();

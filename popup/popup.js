@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Listen for storage changes from in-page settings
+  // Listen for storage changes from in-page settings or track updates
   if (chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync') {
@@ -130,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         applySettingsToUI();
       }
+      updateTrackCard();
     });
   }
 
@@ -511,6 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Query Current Track Info from YouTube Music tab
   function updateTrackCard() {
+    if (typeof chrome === 'undefined' || !chrome.tabs || !chrome.tabs.query) return;
     chrome.tabs.query({ url: '*://music.youtube.com/*' }, (tabs) => {
       if (tabs && tabs.length > 0) {
         chrome.tabs.sendMessage(tabs[0].id, { action: 'GET_STATUS' }, (res) => {

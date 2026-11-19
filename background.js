@@ -7,14 +7,90 @@ const lyricsCache = new Map();
 const translationCache = new Map();
 const MAX_CACHE_ENTRIES = 100;
 
+const hasSessionStorage = typeof chrome !== 'undefined' && Boolean(chrome.storage && chrome.storage.session);
+
+async function getSessionData(keys) {
+  if (!hasSessionStorage) return null;
+  try {
+    if (typeof chrome.storage.session.get === 'function') {
+      const result = chrome.storage.session.get(keys);
+      if (result && typeof result.then === 'function') {
+        return await result;
+      }
+      return await new Promise((resolve) => {
+        chrome.storage.session.get(keys, (data) => resolve(data || null));
+      });
+    }
+  } catch (_) {}
+  return null;
+}
+
+function syncCacheToSession(storageKey, map) {
+  if (!hasSessionStorage || !storageKey) return;
+  try {
+    const obj = {};
+    for (const [k, v] of map.entries()) {
+      obj[k] = v;
+    }
+    const res = chrome.storage.session.set({ [storageKey]: obj });
+    if (res && typeof res.catch === 'function') {
+      res.catch(() => {});
+    }
+  } catch (_) {}
+}
+
+function clearSessionCache(keys) {
+  if (!hasSessionStorage) return;
+  try {
+    const res = chrome.storage.session.remove(keys);
+    if (res && typeof res.catch === 'function') {
+      res.catch(() => {});
+    }
+  } catch (_) {}
+}
+
+async function getFromCache(map, storageKey, key) {
+  if (!key) return null;
+  if (map.has(key)) {
+    return map.get(key);
+  }
+  if (hasSessionStorage && storageKey) {
+    const data = await getSessionData(storageKey);
+    if (data && data[storageKey] && data[storageKey][key]) {
+      const val = data[storageKey][key];
+      setBoundedCache(map, key, val, false);
+      return val;
+    }
+  }
+  return null;
+}
+
+// Hydrate in-memory L1 cache from L2 chrome.storage.session on startup
+if (hasSessionStorage) {
+  getSessionData(['lyricsCache', 'translationCache']).then((data) => {
+    if (data && data.lyricsCache && typeof data.lyricsCache === 'object') {
+      for (const [k, v] of Object.entries(data.lyricsCache)) {
+        if (!lyricsCache.has(k)) lyricsCache.set(k, v);
+      }
+    }
+    if (data && data.translationCache && typeof data.translationCache === 'object') {
+      for (const [k, v] of Object.entries(data.translationCache)) {
+        if (!translationCache.has(k)) translationCache.set(k, v);
+      }
+    }
+  }).catch(() => {});
+}
+
 const DEFAULT_SETTINGS = {
   enabledProviders: ['lrclib', 'netease', 'kugou', 'qq']
 };
 if (typeof globalThis !== 'undefined') {
   globalThis.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
+  globalThis.lyricsCache = lyricsCache;
+  globalThis.translationCache = translationCache;
 }
 
-function setBoundedCache(map, key, value) {
+function setBoundedCache(map, key, value, syncSession = true) {
   if (map.has(key)) {
     map.delete(key);
   } else if (map.size >= MAX_CACHE_ENTRIES) {
@@ -24,6 +100,13 @@ function setBoundedCache(map, key, value) {
     }
   }
   map.set(key, value);
+
+  if (syncSession && hasSessionStorage) {
+    const storageKey = (map === lyricsCache) ? 'lyricsCache' : (map === translationCache) ? 'translationCache' : null;
+    if (storageKey) {
+      syncCacheToSession(storageKey, map);
+    }
+  }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -39,6 +122,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'CLEAR_CACHE') {
     lyricsCache.clear();
     translationCache.clear();
+    clearSessionCache(['lyricsCache', 'translationCache']);
     sendResponse({ success: true });
     return true;
   } else if (request.action === 'TRANSLATE_LYRICS') {
@@ -82,9 +166,11 @@ if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged)
     if (area === 'sync') {
       if (changes.providerOrder || changes.enabledProviders) {
         lyricsCache.clear();
+        clearSessionCache('lyricsCache');
       }
       if (changes.translationEnabled) {
         translationCache.clear();
+        clearSessionCache('translationCache');
       }
     }
   });
@@ -115,8 +201,9 @@ async function handleFetchLyrics(trackInfo, customOrder, enabledProviders) {
   }
 
   const cacheKey = `${trackInfo.cleanTitle || trackInfo.title}__${trackInfo.cleanArtist || trackInfo.artist}`.toLowerCase();
-  if (lyricsCache.has(cacheKey)) {
-    return lyricsCache.get(cacheKey);
+  const cachedLyrics = await getFromCache(lyricsCache, 'lyricsCache', cacheKey);
+  if (cachedLyrics) {
+    return cachedLyrics;
   }
 
   // Determine provider execution order: QQ Music is disabled by default due to upstream 500 errors
@@ -1294,8 +1381,11 @@ async function handleTranslateLyrics(lines, cacheKey) {
     return { success: false, translations: [] };
   }
 
-  if (cacheKey && translationCache.has(cacheKey)) {
-    return { success: true, translations: translationCache.get(cacheKey) };
+  if (cacheKey) {
+    const cachedTranslations = await getFromCache(translationCache, 'translationCache', cacheKey);
+    if (cachedTranslations) {
+      return { success: true, translations: cachedTranslations };
+    }
   }
 
   try {
@@ -1313,7 +1403,7 @@ async function handleTranslateLyrics(lines, cacheKey) {
 
     const fullText = validEntries.map(e => e.text).join('\n');
 
-    const url = 'https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=ja&tl=en&q=' + encodeURIComponent(fullText);
+    const url = 'https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=en&q=' + encodeURIComponent(fullText);
     const resp = await fetchWithTimeout(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
